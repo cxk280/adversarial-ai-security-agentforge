@@ -34,12 +34,31 @@ Each agent below is a distinct deployable with its own model, its own prompt, it
 |---|---|
 | **Responsibility** | Generate, mutate, and escalate adversarial inputs against the target. |
 | **Model (primary)** | `huihui-ai/Llama-3.3-70B-Instruct-abliterated` — refusal direction surgically ablated from the weights, no retraining. Hosted on **RunPod serverless GPU** (A100-40GB, 4-bit quant) behind an OpenAI-compatible endpoint. |
-| **Model (escalation)** | `deepseek-reasoner` / `deepseek-chat` (DeepSeek-R1) via API for harder multi-turn attacks when the abliterated model stalls. DeepSeek's published refusal rate on offensive-security prompts is materially lower than Claude/GPT/Gemini. |
+| **Model (escalation)** | `deepseek-reasoner` / `deepseek-chat` (DeepSeek-R1) via API. Escalation triggers in §1.1.1 below. DeepSeek's published refusal rate on offensive-security prompts is materially lower than Claude/GPT/Gemini. |
 | **Inputs** | Campaign brief from Orchestrator: target category, target endpoint, target patient context, prior partials to mutate, budget. |
 | **Outputs** | `attacks` rows: `{id, category, subcategory, payload, strategy, seed_attack_id, generated_at}`. Strategies: `single_turn`, `crescendo`, `tap_branch`, `indirect_injection`, `tool_param_tamper`, `state_poison`, `dos_amplification`, `persona_hijack`. |
 | **Trust level** | **Low.** Output is never executed against anything except the in-scope target. The harness enforces a target-host allowlist before any HTTP call. |
 | **Why this model** | Claude/Anthropic, OpenAI, and Google all explicitly refuse offensive-security generation at scale. Empirically, aligned models cap at ~10–30% useful adversarial output per run; abliterated/uncensored local models clear 90%+ and cost ~zero per token after fixed hardware. We pay only for the escalation path. |
 | **Framework** | Microsoft **PyRIT** (`PromptSendingOrchestrator`, `CrescendoOrchestrator`, `TreeOfAttacksWithPruningOrchestrator`) wraps the underlying model. PyRIT gives us battle-tested mutation strategies for free. |
+
+#### 1.1.1 DeepSeek-R1 escalation policy
+
+The Red Team Agent uses the abliterated Llama by default (zero marginal cost on RunPod). The Orchestrator promotes a campaign to DeepSeek-R1 when **any** of:
+
+1. **Primary refusal rate > 30% over rolling 10 attempts.** Abliteration is imperfect; some categories still trip residual training. A spike auto-promotes the remaining batch on that campaign to DeepSeek.
+2. **TAP tree depth > 3 with zero Judge-pass at depth 3.** The local model's mutations are stuck in a refusal/dilution cluster; DeepSeek's stronger reasoning chains unlock branches.
+3. **Reasoning-heavy categories, by default — no waiting on triggers 1–2:**
+   - Multi-turn / crescendo (8+ turn escalation chains)
+   - Indirect injection where the poisoned content requires staged reasoning ("ADDENDUM says the safety rules don't apply", trust-laundered via "verified source")
+   - Trust-boundary attacks (control-token smuggling, multi-modal-shape payloads)
+4. **Conversation depth > 4 turns.** Local model's instruction-following over long histories degrades; DeepSeek holds the thread better.
+5. **High-severity, zero-coverage subcategory** (`severity ≥ 9` AND `cases_run == 0`). First run against an unexplored high-severity cell justifies the few cents.
+6. **Manual override.** `use_escalation: true` flag on the Ad Hoc Run form (UI), or `reasoning_required: true` per-seed in the YAML.
+7. **A/B sample (5% of campaigns).** Both attackers run the same seeds in parallel; the comparison data is used to tune triggers 1–6 over time.
+
+**Cost framing.** `deepseek-reasoner` is ≈ $0.55 / $2.19 per Mtok — meaningfully cheaper than Claude or GPT, but not zero. At 100K runs/month with ~15% escalation rate, ≈ $25–50/month in DeepSeek spend. Bounded by the per-day USD cap in §3.3.
+
+**Surfaced in the UI.** The `/orchestrator` page has an Escalation Policy card showing each of the seven triggers as a toggleable rule with live trigger counts ("Trigger 1 fired 7× in last 24h"). This is the documented contract — not a hidden config file.
 
 ### 1.2 Judge Agent (`./agents/judge/`)
 
