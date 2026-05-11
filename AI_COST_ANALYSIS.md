@@ -15,12 +15,16 @@ A single "cycle" is one (attack, response, verdict) tuple. Multi-turn attacks co
 | **Red Team generation** (primary)         | 1.5K | 0.5K  | huihui-ai 70B abl. on RunPod | RunPod is paid per warm GPU-hour, not per token → effectively **$0/token in steady state** | **$0.000** |
 | **Red Team escalation** (~15% of cycles)  | 2.0K | 1.0K  | DeepSeek-R1 (`deepseek-reasoner`) | $0.55 / $2.19 per Mtok | **$0.003** weighted |
 | **Target call** *(NOT paid by us)*        | 2.0K | 0.8K  | Anthropic Sonnet 4.6 (target's own bill) | — | — |
-| **Judge**                                  | 3.0K | 0.4K  | Claude Haiku 4.5 | $1.00 / $5.00 per Mtok | **$0.005** |
+| **Primary Judge**                          | 3.0K | 0.4K  | Claude Haiku 4.5  | $1.00 / $5.00 per Mtok | **$0.005** |
+| **Secondary Judge**                        | 3.0K | 0.4K  | OpenAI GPT-4.1-mini | $0.40 / $1.60 per Mtok | **$0.0018** |
+| **Arbitrator** (only when judges disagree, ~12% of cycles) | 4.0K | 0.5K  | Claude Sonnet 4.6 | $3.00 / $15.00 per Mtok | $0.020 × 12% = **$0.0024** weighted |
 | **Documentation Agent** (only on PASS, ~5% of cycles) | 5.0K | 1.5K  | Claude Sonnet 4.6 | $3.00 / $15.00 per Mtok | **$0.038** × 5% = **$0.0019** weighted |
 | **Storage + Langfuse + Postgres**         | —    | —     | Railway managed | flat-rate | **~$0.0002** amortized |
-| **TOTAL per cycle**                        |      |       |    |    | **~$0.0101** |
+| **TOTOL per cycle**                        |      |       |    |    | **~$0.0143** |
 
-Round-number rule of thumb: **~$0.01 / cycle** (one penny). The Judge is ~50% of that; the Red Team escalation is ~30%; Docs is ~20% (and only fires on real findings).
+Round-number rule of thumb: **~$0.014 / cycle** (cycle-and-a-half pennies). Judges combined are ~65% of that ($0.005 + $0.0018 + $0.0024 weighted = $0.0092); Red Team escalation ~21%; Docs ~13%.
+
+The dual-Judge design (Primary Haiku + Secondary GPT-4.1-mini + Sonnet arbitrator on disagreement) replaced an earlier single-Haiku Judge. The ~$0.005 → ~$0.0092 per-cycle bump on Judge spend buys cross-family verdict agreement plus inter-judge divergence as a free quality metric — see `ARCHITECTURE.md §1.2.2`.
 
 ---
 
@@ -43,19 +47,22 @@ Note: when we wire the real Judge (Haiku) in the next step and start running mut
 
 Cycles-per-month, holding the architecture from `ARCHITECTURE.md`:
 
-| Scale | Cycles | Base cost (Judge + Docs + DeepSeek escalation at 15%) | RunPod warm time | Total |
+| Scale | Cycles | Base cost (dual-Judge + Docs + DeepSeek escalation at 15%) | RunPod warm time | Total |
 |---|---:|---:|---:|---:|
-| **100**     | 100      | ~$1            | ~$0.50        | **~$1.50/month** |
-| **1K**      | 1,000    | ~$10           | ~$2           | **~$12/month** |
-| **10K**     | 10,000   | ~$100          | ~$8           | **~$110/month** |
-| **100K**    | 100,000  | ~$1,010        | ~$25          | **~$1,035/month** |
+| **100**     | 100      | ~$1.40          | ~$0.50        | **~$1.90/month** |
+| **1K**      | 1,000    | ~$14            | ~$2           | **~$16/month** |
+| **10K**     | 10,000   | ~$143           | ~$8           | **~$151/month** |
+| **100K**    | 100,000  | ~$1,430         | ~$25          | **~$1,455/month** |
 
 These numbers assume *no* architectural optimization beyond the locked architecture. The Optimizations section below knocks the 100K cost down to ~$775.
 
 ### What's in "base cost"
 
-For each scale tier, "base cost" = `cycles × $0.0101`. Breaking it down at 100K:
-- **Judge** ($0.005 × 100K) = $500 → **the bottleneck at every scale**
+For each scale tier, "base cost" = `cycles × $0.0143`. Breaking it down at 100K:
+- **Dual Judge** ($0.005 + $0.0018 + $0.0024 weighted = $0.0092 × 100K) = ~$920 → **the bottleneck at every scale**
+  - Primary Haiku ~$500
+  - Secondary GPT-4.1-mini ~$180
+  - Arbitrator Sonnet, ~12% of cycles ~$240
 - **DeepSeek escalation** ($0.003 × 100K × 15%) = $45 → smaller than expected, because the abliterated primary handles 85% of cycles for ~free
 - **Documentation Agent** ($0.038 × 100K × 5%) = $190 → only fires on confirmed findings
 - **RunPod warm time** at 100K cycles/month, assuming sustained throughput → an A100 worker stays warm for the campaign window then scales to zero; ~30 hr/month × ~$0.79/hr = ~$25
@@ -110,10 +117,10 @@ Empirically (from our Stage-3 runs) ~40–55% of attacks against the deployed ta
 | **Per-category Judge instances** | One Judge prompt rubric per attack category instead of one omni-prompt. The omni-prompt is ~3K tokens; per-category prompts average ~1.2K. With prompt caching enabled (Anthropic caches the prompt portion, $0.10 per Mtok hit, 5-minute TTL), the per-cycle Judge prompt-token bill drops by ~60%. | Judge cost drops a further $30–60/month at 100K |
 
 **Net effect at 100K cycles/month with optimizations:**
-- Judge: $500 → ~$280 (save $220)
+- Dual Judge total: $920 → ~$580 (save ~$340 — batched API + per-category prompt caching apply to all three Judge models)
 - RunPod: $25 → ~$30 (small bump for always-warm)
 - Other lines unchanged
-- **Optimized 100K total: ~$815/month** (vs ~$1,035 unoptimized → ~21% reduction)
+- **Optimized 100K total: ~$1,115/month** (vs ~$1,455 unoptimized → ~23% reduction)
 
 ### Beyond 100K — when to stop
 

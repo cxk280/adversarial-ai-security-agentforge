@@ -464,6 +464,33 @@ def build() -> None:
         ],
     )
 
+    # 7b. Dual-Judge cross-validation
+    add_content_slide(
+        prs,
+        "Judge cross-validation — two models, two families",
+        [
+            ("The Judge is load-bearing — a wrong Judge invalidates the entire regression history.", []),
+            ("Two judges from different model families score every (attack, response) pair in parallel.", [
+                "Primary: claude-haiku-4-5 (Anthropic). Fast, cheap, frontier alignment helps with judgment.",
+                "Secondary: gpt-4.1-mini (OpenAI). Different family. ~$0.40 / $1.60 per Mtok — cheaper than Haiku at our token mix.",
+                "Arbitrator (fires only on disagreement, ~12% of cycles): claude-sonnet-4-6.",
+            ]),
+            ("Decision protocol:", [
+                "BOTH PASS → pass, confidence HIGH → promote to regression suite",
+                "BOTH FAIL → fail, confidence HIGH → dismiss",
+                "DISAGREE → arbitrator decides, confidence MEDIUM",
+                "EITHER INCONCLUSIVE → inconclusive, confidence LOW → human queue",
+            ]),
+            ("Why this matters:", [
+                "Cross-family agreement is a stronger correctness signal than within-family.",
+                "Inter-judge divergence rate is a free quality metric — > 20% means rubric needs review.",
+                "Same-family Judge drift becomes visible — provider-side regressions don't coincide silently.",
+            ]),
+            ("Cost: Judge total ~$500 → ~$725 at 100K cycles/month (~45% increase) for substantially stronger correctness guarantees.", []),
+        ],
+        footer="Anti-drift: golden set must score ≥95% per-judge AND ≥90% inter-judge agreement before any rubric change merges.",
+    )
+
     # 8. DeepSeek escalation policy
     add_content_slide(
         prs,
