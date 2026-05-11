@@ -1,0 +1,37 @@
+# Keep the runtime image lean — exclude everything that isn't service code.
+
+.git/
+.gitignore
+.github/
+
+# Frontend — built and deployed separately as `adversary-ui`
+ui/
+
+# Build outputs / package state
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+node_modules/
+.next/
+
+# Local-only artifacts
+*.sqlite
+*.sqlite-journal
+.env*
+.DS_Store
+
+# Design assets and docs that don't ship inside the container
+design/
+docs/
+
+# Test scaffolding
+tests/
+**/__tests__/
+
+# CircleCI / CI configs
+.circleci/
+
+# Anything under /tmp or cached deck PNGs
+ARCHITECTURE_DEFENSE.pptx
+*.pptx
