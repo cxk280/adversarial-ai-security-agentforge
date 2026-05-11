@@ -11,3 +11,8 @@ pydantic>=2.5
 
 # Async HTTP client for the Red Team Mutator's LLM client adapters
 httpx>=0.26
+
+# Dual LLM Judge SDKs — Anthropic for Primary (Haiku) and Arbitrator
+# (Sonnet); OpenAI for Secondary (GPT-4.1-mini). Per ARCHITECTURE.md §1.2.
+anthropic>=0.40
+openai>=1.50
