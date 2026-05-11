@@ -1,5 +1,13 @@
-# Stage-3 prototype runtime — minimal. Mutation, judge, orchestrator,
-# and PyRIT integration add their own dependencies in later phases.
+# Runtime dependencies for the adversarial AI security platform.
 
+# Core HTTP + YAML (used by harness, seed dispatcher, run_seed_campaign)
 requests>=2.31
 PyYAML>=6.0
+
+# FastAPI service (adversary-agent) — service/
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+
+# Async HTTP client for the Red Team Mutator's LLM client adapters
+httpx>=0.26
