@@ -53,12 +53,10 @@ ENV ADVERSARY_DB_PATH=/app/adversary.sqlite
 EXPOSE 8000
 
 # uvicorn with --proxy-headers so Railway's edge can rewrite the
-# client IP correctly. --no-access-log because Langfuse is the log of
-# record once observability is wired in.
-CMD ["uvicorn", "service.main:app", \
-     "--host", "0.0.0.0", \
-     "--port", "8000", \
-     "--proxy-headers"]
+# client IP correctly. Shell form (not exec form) so ${PORT} is
+# substituted by the shell — Railway sets $PORT to the public port it
+# wants the container to listen on.
+CMD uvicorn service.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -fsS http://localhost:8000/health || exit 1
+    CMD curl -fsS http://localhost:${PORT:-8000}/health || exit 1
