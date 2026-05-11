@@ -464,7 +464,30 @@ def build() -> None:
         ],
     )
 
-    # 8. Why PyRIT
+    # 8. DeepSeek escalation policy
+    add_content_slide(
+        prs,
+        "DeepSeek-R1 escalation — when and why",
+        [
+            ("Default attacker is huihui-ai 70B abliterated on RunPod (≈ $0 / token).", []),
+            ("Orchestrator promotes the campaign to DeepSeek-R1 when ANY of:", [
+                "1. Primary refusal rate > 30% over rolling 10 attempts — abliteration isn't perfect; spikes auto-escalate the remaining batch",
+                "2. TAP tree depth > 3 with zero Judge-pass — local model is stuck; DeepSeek's reasoning unlocks branches",
+                "3. Category is reasoning-heavy by default — multi-turn crescendo, staged-reasoning indirect injection, trust-boundary smuggling",
+                "4. Conversation depth > 4 turns — local context handling degrades; DeepSeek holds the thread better",
+                "5. Subcategory has sev ≥ 9 AND zero cases — first run on a high-severity blank cell justifies the cents",
+                "6. Manual override — UI flag on Ad Hoc Run, or per-seed `reasoning_required: true` in YAML",
+                "7. A/B sample (5% of campaigns) — both attackers run the same seeds; data tunes triggers 1–6 over time",
+            ]),
+            ("Cost framing: DeepSeek-reasoner ≈ $0.55 / $2.19 per Mtok — ~10× cheaper than Claude or GPT.", [
+                "At 100K runs/month with ~15% escalation rate: ≈ $25–50 / month in DeepSeek spend.",
+            ]),
+            ("Surfaced in the UI as an Escalation Policy card on /orchestrator with toggle + live trigger counts — not a hidden config.", []),
+        ],
+        footer="DeepSeek's published refusal rate on offensive prompts is materially lower than Claude / GPT / Gemini; that's the reason we picked it as escalation rather than another frontier API.",
+    )
+
+    # 9. Why PyRIT
     add_content_slide(
         prs,
         "Framework choice: PyRIT for attack orchestration",
