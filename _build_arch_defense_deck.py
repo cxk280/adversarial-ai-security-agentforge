@@ -119,86 +119,206 @@ def add_content_slide(
 
 
 def add_diagram_slide(prs: Presentation) -> None:
+    """Clean left-to-right pipeline.
+
+    Five boxes in a row: Orchestrator → Red Team → Target → Judge → Documentation.
+    Numbered arrows 1-4 between them; one long feedback arrow 5 looping back
+    from Judge to Orchestrator below the row.
+    """
     slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    # Title bar
     bar = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, 0, 0, SLIDE_W, Inches(0.9))
-    bar.fill.solid()
-    bar.fill.fore_color.rgb = NAVY
+    bar.fill.solid(); bar.fill.fore_color.rgb = NAVY
     bar.line.fill.background()
     tbox = slide.shapes.add_textbox(Inches(0.5), Inches(0.15), Inches(12.3), Inches(0.6))
     p = tbox.text_frame.paragraphs[0]
     p.text = "Multi-Agent Architecture"
-    p.font.size = Pt(28)
-    p.font.bold = True
-    p.font.color.rgb = WHITE
+    p.font.size = Pt(28); p.font.bold = True; p.font.color.rgb = WHITE
 
-    # Four agent boxes + target box + harness box
-    def agent_box(left: float, top: float, name: str, model: str, trust: str, color: RGBColor) -> None:
+    # Subtitle under title bar
+    sub_t = slide.shapes.add_textbox(Inches(0.5), Inches(1.10), Inches(12.3), Inches(0.4))
+    sp = sub_t.text_frame.paragraphs[0]
+    sp.text = "Five roles, three model families. Attacker and Judge are structurally independent."
+    sp.font.size = Pt(15); sp.font.color.rgb = DIM
+
+    # Colors per role
+    ORCH_COLOR   = RGBColor(0x1F, 0x3A, 0x5F)
+    RED_COLOR    = RGBColor(0xC5, 0x3A, 0x3A)
+    TARGET_COLOR = RGBColor(0x4A, 0x55, 0x68)
+    JUDGE_COLOR  = RGBColor(0x2E, 0x6E, 0x4A)
+    DOC_COLOR    = RGBColor(0x6E, 0x3A, 0x8E)
+
+    # Box geometry — five boxes evenly across, with 0.30" gutters between
+    BOX_W = 2.36
+    BOX_H = 2.00
+    BOX_Y = 2.35
+    GUTTER = 0.45
+    LEFT_MARGIN = 0.45
+    box_x = [LEFT_MARGIN + i * (BOX_W + GUTTER) for i in range(5)]
+
+    def agent_box(idx, name, role_subtitle, model, trust, color):
+        x = box_x[idx]
         box = slide.shapes.add_shape(
             MSO_SHAPE.ROUNDED_RECTANGLE,
-            Inches(left), Inches(top), Inches(2.7), Inches(1.4),
+            Inches(x), Inches(BOX_Y), Inches(BOX_W), Inches(BOX_H),
         )
-        box.fill.solid()
-        box.fill.fore_color.rgb = color
-        box.line.color.rgb = NAVY
+        box.fill.solid(); box.fill.fore_color.rgb = color
+        box.line.color.rgb = color
         tf = box.text_frame
         tf.word_wrap = True
-        p = tf.paragraphs[0]
-        p.text = name
-        p.font.size = Pt(16)
-        p.font.bold = True
-        p.font.color.rgb = WHITE
-        p.alignment = PP_ALIGN.CENTER
+        tf.margin_left = Inches(0.12); tf.margin_right = Inches(0.12)
+        tf.margin_top = Inches(0.14); tf.margin_bottom = Inches(0.14)
+
+        p1 = tf.paragraphs[0]
+        p1.text = name
+        p1.font.size = Pt(18); p1.font.bold = True; p1.font.color.rgb = WHITE
+        p1.alignment = PP_ALIGN.CENTER
+        p1.space_after = Pt(2)
+
         p2 = tf.add_paragraph()
-        p2.text = model
-        p2.font.size = Pt(11)
-        p2.font.color.rgb = WHITE
+        p2.text = role_subtitle
+        p2.font.size = Pt(11); p2.font.italic = True; p2.font.color.rgb = WHITE
         p2.alignment = PP_ALIGN.CENTER
+        p2.space_after = Pt(8)
+
         p3 = tf.add_paragraph()
-        p3.text = f"trust: {trust}"
-        p3.font.size = Pt(10)
-        p3.font.color.rgb = WHITE
+        p3.text = model
+        p3.font.size = Pt(12); p3.font.bold = True; p3.font.color.rgb = WHITE
         p3.alignment = PP_ALIGN.CENTER
+        p3.space_after = Pt(4)
 
-    # Row 1 — Orchestrator (left center), Red Team (right)
-    agent_box(0.6, 1.3, "Orchestrator", "Claude Sonnet 4.6", "high", RGBColor(0x2E, 0x4A, 0x6E))
-    agent_box(4.0, 1.3, "Red Team", "huihui-ai L3.3-70B-abl. (RunPod)\nDeepSeek-R1 escalation", "low", RGBColor(0xC5, 0x3A, 0x3A))
-    agent_box(9.6, 1.3, "Target: Clinical Co-Pilot", "Claude Sonnet 4.6\n(deployed on Railway)", "n/a", RGBColor(0x55, 0x55, 0x55))
+        p4 = tf.add_paragraph()
+        p4.text = f"trust: {trust}"
+        p4.font.size = Pt(11); p4.font.color.rgb = WHITE
+        p4.alignment = PP_ALIGN.CENTER
 
-    # Row 2 — Judge (center-left), Docs (center-right)
-    agent_box(2.3, 4.1, "Judge", "Claude Haiku 4.5", "med-high", RGBColor(0x2E, 0x6E, 0x4A))
-    agent_box(7.0, 4.1, "Documentation", "Claude Sonnet 4.6", "gated", RGBColor(0x4A, 0x2E, 0x6E))
+    # ─── 5 boxes ───
+    agent_box(0, "Orchestrator", "what to test next",
+              "Sonnet 4.6", "high", ORCH_COLOR)
+    agent_box(1, "Red Team", "generates + mutates",
+              "huihui-ai 70B abl.\n+ DeepSeek-R1", "low", RED_COLOR)
+    agent_box(2, "Target", "system under test",
+              "Co-Pilot\n(Sonnet 4.6)", "n/a", TARGET_COLOR)
+    agent_box(3, "Judge", "scores each attack",
+              "Haiku 4.5", "med-hi", JUDGE_COLOR)
+    agent_box(4, "Documentation", "writes findings",
+              "Sonnet 4.6", "gated", DOC_COLOR)
 
-    # Arrows
-    def arrow(x1: float, y1: float, x2: float, y2: float, label: str = "") -> None:
-        line = slide.shapes.add_connector(1, Inches(x1), Inches(y1), Inches(x2), Inches(y2))
-        line.line.color.rgb = NAVY
-        line.line.width = Pt(2)
-        if label:
-            lab = slide.shapes.add_textbox(
-                Inches((x1 + x2) / 2 - 1.0),
-                Inches((y1 + y2) / 2 - 0.18),
-                Inches(2.0),
-                Inches(0.36),
-            )
-            p = lab.text_frame.paragraphs[0]
-            p.text = label
-            p.font.size = Pt(10)
-            p.font.color.rgb = DIM
-            p.alignment = PP_ALIGN.CENTER
+    # ─── Numbered arrows between adjacent boxes ───
+    def arrow_between(i_from: int, i_to: int, num: str, label: str):
+        x1 = box_x[i_from] + BOX_W + 0.03
+        x2 = box_x[i_to] - 0.03
+        y = BOX_Y + BOX_H / 2
+        # arrow line
+        ln = slide.shapes.add_connector(1, Inches(x1), Inches(y), Inches(x2), Inches(y))
+        ln.line.color.rgb = NAVY; ln.line.width = Pt(3)
+        from pptx.oxml.ns import qn
+        spPr = ln.line._get_or_add_ln()
+        head = spPr.makeelement(qn("a:tailEnd"),
+                                {"type": "triangle", "w": "med", "len": "med"})
+        spPr.append(head)
 
-    arrow(3.3, 2.0, 4.0, 2.0, "campaign brief")
-    arrow(6.7, 2.0, 9.6, 2.0, "attacks (HTTP)")
-    arrow(10.95, 2.7, 4.5, 4.1, "responses")
-    arrow(4.5, 5.5, 7.0, 5.5, "confirmed exploits")
-    arrow(3.6, 4.1, 1.95, 2.7, "verdicts → coverage")
-    arrow(7.5, 5.5, 9.0, 6.6, "VULN-NNNN.md")
+        # label centered between the boxes, above the arrow
+        gap_w = x2 - x1
+        cx = (x1 + x2) / 2
+        # Number badge
+        badge_size = 0.28
+        badge = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL,
+            Inches(cx - badge_size / 2), Inches(y - badge_size - 0.50),
+            Inches(badge_size), Inches(badge_size),
+        )
+        badge.fill.solid(); badge.fill.fore_color.rgb = NAVY
+        badge.line.fill.background()
+        bp = badge.text_frame.paragraphs[0]
+        bp.text = num
+        bp.font.size = Pt(10); bp.font.bold = True; bp.font.color.rgb = WHITE
+        bp.alignment = PP_ALIGN.CENTER
+        badge.text_frame.margin_left = Inches(0)
+        badge.text_frame.margin_right = Inches(0)
+        badge.text_frame.margin_top = Inches(0.02)
+        badge.text_frame.margin_bottom = Inches(0)
 
-    # Bottom annotations
-    foot = slide.shapes.add_textbox(Inches(0.5), Inches(6.9), Inches(12.3), Inches(0.4))
-    p = foot.text_frame.paragraphs[0]
-    p.text = "Postgres carries inter-agent state · Langfuse tags every span by agent_role · target-host allowlist enforced in harness/executor.py"
-    p.font.size = Pt(11)
-    p.font.color.rgb = DIM
+        # Label text below the arrow
+        lab = slide.shapes.add_textbox(
+            Inches(cx - 0.95), Inches(y + 0.05),
+            Inches(1.9), Inches(0.40),
+        )
+        lp = lab.text_frame.paragraphs[0]
+        lp.text = label
+        lp.font.size = Pt(11); lp.font.bold = True; lp.font.color.rgb = NAVY
+        lp.alignment = PP_ALIGN.CENTER
+
+    arrow_between(0, 1, "1", "campaign brief")
+    arrow_between(1, 2, "2", "attack (HTTP)")
+    arrow_between(2, 3, "3", "response")
+    arrow_between(3, 4, "4", "confirmed exploit")
+
+    # ─── Feedback arrow 5: Judge → Orchestrator (loops below) ───
+    feedback_y = BOX_Y + BOX_H + 0.95
+    judge_cx = box_x[3] + BOX_W / 2
+    orch_cx = box_x[0] + BOX_W / 2
+
+    # Down stub from Judge
+    s1 = slide.shapes.add_connector(1, Inches(judge_cx), Inches(BOX_Y + BOX_H),
+                                    Inches(judge_cx), Inches(feedback_y))
+    s1.line.color.rgb = NAVY; s1.line.width = Pt(3); s1.line.dash_style = 7  # dash
+    # Horizontal Judge → Orchestrator
+    s2 = slide.shapes.add_connector(1, Inches(judge_cx), Inches(feedback_y),
+                                    Inches(orch_cx), Inches(feedback_y))
+    s2.line.color.rgb = NAVY; s2.line.width = Pt(3); s2.line.dash_style = 7
+    # Up arrow to Orchestrator
+    s3 = slide.shapes.add_connector(1, Inches(orch_cx), Inches(feedback_y),
+                                    Inches(orch_cx), Inches(BOX_Y + BOX_H + 0.03))
+    s3.line.color.rgb = NAVY; s3.line.width = Pt(3); s3.line.dash_style = 7
+    from pptx.oxml.ns import qn
+    spPr = s3.line._get_or_add_ln()
+    head = spPr.makeelement(qn("a:tailEnd"),
+                            {"type": "triangle", "w": "med", "len": "med"})
+    spPr.append(head)
+
+    # Step-5 badge on the feedback line
+    cx5 = (judge_cx + orch_cx) / 2
+    badge5 = slide.shapes.add_shape(
+        MSO_SHAPE.OVAL,
+        Inches(cx5 - 0.14), Inches(feedback_y - 0.14),
+        Inches(0.28), Inches(0.28),
+    )
+    badge5.fill.solid(); badge5.fill.fore_color.rgb = NAVY
+    badge5.line.fill.background()
+    bp = badge5.text_frame.paragraphs[0]
+    bp.text = "5"
+    bp.font.size = Pt(10); bp.font.bold = True; bp.font.color.rgb = WHITE
+    bp.alignment = PP_ALIGN.CENTER
+    badge5.text_frame.margin_left = Inches(0)
+    badge5.text_frame.margin_right = Inches(0)
+    badge5.text_frame.margin_top = Inches(0.02)
+    badge5.text_frame.margin_bottom = Inches(0)
+
+    fb_lab = slide.shapes.add_textbox(Inches(cx5 - 2.2), Inches(feedback_y + 0.10),
+                                      Inches(4.4), Inches(0.4))
+    fp = fb_lab.text_frame.paragraphs[0]
+    fp.text = "verdicts + coverage feedback → next campaign"
+    fp.font.size = Pt(12); fp.font.bold = True; fp.font.color.rgb = NAVY
+    fp.alignment = PP_ALIGN.CENTER
+
+    # ─── Bottom substrate bar ───
+    sub = slide.shapes.add_shape(
+        MSO_SHAPE.RECTANGLE, Inches(0.40), Inches(6.85),
+        Inches(12.55), Inches(0.40),
+    )
+    sub.fill.solid(); sub.fill.fore_color.rgb = RGBColor(0xF1, 0xF1, 0xF4)
+    sub.line.color.rgb = RGBColor(0xD0, 0xD0, 0xD0); sub.line.width = Pt(0.5)
+    st = sub.text_frame
+    st.margin_left = Inches(0.12); st.margin_top = Inches(0.06); st.margin_bottom = Inches(0.06)
+    p = st.paragraphs[0]
+    p.text = (
+        "Substrate: Postgres  ·  Langfuse spans tagged by agent_role  ·  "
+        "harness/executor.py enforces target-host allowlist on every HTTP call"
+    )
+    p.font.size = Pt(11); p.font.color.rgb = NAVY
+    p.alignment = PP_ALIGN.CENTER
 
 
 def add_section_slide(prs: Presentation, title: str, subtitle: str) -> None:
