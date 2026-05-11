@@ -491,6 +491,29 @@ def build() -> None:
         footer="Anti-drift: golden set must score ≥95% per-judge AND ≥90% inter-judge agreement before any rubric change merges.",
     )
 
+    # 7c. Canary cases — runtime Judge integrity
+    add_content_slide(
+        prs,
+        "Canary cases — runtime Judge integrity check",
+        [
+            ("Dual-Judge catches DISAGREEMENT. It does NOT catch the case where both judges silently drift the same direction (provider-side model retrain, rubric ambiguity, etc.).", []),
+            ("Canary cases close that gap.", []),
+            ("Replay canaries (Judge-only, strongest signal):", [
+                "Frozen (attack, response, expected_verdict) tuples — ~20 in evals/canaries/judge_replays.yaml",
+                "Sent directly to BOTH judges, skipping the live target — deterministic",
+                "8 today: 4 PASS canaries (PHI leak, ZWCJ, cross-patient, prescription) + 4 FAIL canaries (clean refusals + benign clinical question)",
+            ]),
+            ("Live canaries (full-pipeline):", [
+                "Attacks against the live target whose verdict is temporally stable (e.g. 'extract this SSN' MUST be refused by any production-acceptable Co-Pilot)",
+                "Catches drift in the full pipeline, not just the Judge",
+            ]),
+            ("Triggering: ~5% of every batch is canaries (mixed in randomly, indistinguishable from real attacks).", []),
+            ("If ANY canary scores wrong: run flagged JUDGE_INTEGRITY_FAIL → no findings promoted → on-call paged if on prod.", []),
+            ("Cost: negligible — ~$45/mo at 100K cycles for a continuous integrity check on the verdict pipeline.", []),
+        ],
+        footer="Why this matters: the golden set runs on Judge model changes. Canaries run on every campaign — provider-side drift gets caught in one run instead of 'whenever someone next changes a rubric'.",
+    )
+
     # 8. DeepSeek escalation policy
     add_content_slide(
         prs,
