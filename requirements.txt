@@ -1,0 +1,5 @@
+# Stage-3 prototype runtime — minimal. Mutation, judge, orchestrator,
+# and PyRIT integration add their own dependencies in later phases.
+
+requests>=2.31
+PyYAML>=6.0
