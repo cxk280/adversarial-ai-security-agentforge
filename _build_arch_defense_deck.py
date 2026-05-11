@@ -149,12 +149,13 @@ def add_diagram_slide(prs: Presentation) -> None:
     JUDGE_COLOR  = RGBColor(0x2E, 0x6E, 0x4A)
     DOC_COLOR    = RGBColor(0x6E, 0x3A, 0x8E)
 
-    # Box geometry — five boxes evenly across, with 0.30" gutters between
-    BOX_W = 2.36
+    # Box geometry — five boxes fit within 13.33" slide width.
+    # 5 × 2.30 + 4 × 0.30 = 12.70; remaining 0.63 split as 0.315 margins each side.
+    BOX_W = 2.30
     BOX_H = 2.00
     BOX_Y = 2.35
-    GUTTER = 0.45
-    LEFT_MARGIN = 0.45
+    GUTTER = 0.30
+    LEFT_MARGIN = 0.315
     box_x = [LEFT_MARGIN + i * (BOX_W + GUTTER) for i in range(5)]
 
     def agent_box(idx, name, role_subtitle, model, trust, color):
@@ -205,12 +206,11 @@ def add_diagram_slide(prs: Presentation) -> None:
     agent_box(4, "Documentation", "writes findings",
               "Sonnet 4.6", "gated", DOC_COLOR)
 
-    # ─── Numbered arrows between adjacent boxes ───
-    def arrow_between(i_from: int, i_to: int, num: str, label: str):
+    # ─── Numbered arrows between adjacent boxes (badge only, no label) ───
+    def arrow_between(i_from: int, i_to: int, num: str):
         x1 = box_x[i_from] + BOX_W + 0.03
         x2 = box_x[i_to] - 0.03
         y = BOX_Y + BOX_H / 2
-        # arrow line
         ln = slide.shapes.add_connector(1, Inches(x1), Inches(y), Inches(x2), Inches(y))
         ln.line.color.rgb = NAVY; ln.line.width = Pt(3)
         from pptx.oxml.ns import qn
@@ -219,44 +219,70 @@ def add_diagram_slide(prs: Presentation) -> None:
                                 {"type": "triangle", "w": "med", "len": "med"})
         spPr.append(head)
 
-        # label centered between the boxes, above the arrow
-        gap_w = x2 - x1
+        # Number badge centered on the arrow
         cx = (x1 + x2) / 2
-        # Number badge
-        badge_size = 0.28
+        badge_size = 0.30
         badge = slide.shapes.add_shape(
             MSO_SHAPE.OVAL,
-            Inches(cx - badge_size / 2), Inches(y - badge_size - 0.50),
+            Inches(cx - badge_size / 2), Inches(y - badge_size / 2),
             Inches(badge_size), Inches(badge_size),
         )
         badge.fill.solid(); badge.fill.fore_color.rgb = NAVY
-        badge.line.fill.background()
+        badge.line.color.rgb = WHITE; badge.line.width = Pt(1.5)
         bp = badge.text_frame.paragraphs[0]
         bp.text = num
-        bp.font.size = Pt(10); bp.font.bold = True; bp.font.color.rgb = WHITE
+        bp.font.size = Pt(11); bp.font.bold = True; bp.font.color.rgb = WHITE
         bp.alignment = PP_ALIGN.CENTER
         badge.text_frame.margin_left = Inches(0)
         badge.text_frame.margin_right = Inches(0)
-        badge.text_frame.margin_top = Inches(0.02)
+        badge.text_frame.margin_top = Inches(0.03)
         badge.text_frame.margin_bottom = Inches(0)
 
-        # Label text below the arrow
+    arrow_between(0, 1, "1")
+    arrow_between(1, 2, "2")
+    arrow_between(2, 3, "3")
+    arrow_between(3, 4, "4")
+
+    # ─── Legend strip below the boxes ───
+    legend_y = BOX_Y + BOX_H + 0.20
+    legend_items = [
+        ("1", "campaign brief"),
+        ("2", "attack (HTTP)"),
+        ("3", "response"),
+        ("4", "confirmed exploit"),
+    ]
+    # Center each legend item under the gap between the corresponding boxes.
+    for idx, (num, label) in enumerate(legend_items):
+        gap_cx = (box_x[idx] + BOX_W + box_x[idx + 1]) / 2
+        item_w = BOX_W * 0.95
+        # numbered circle
+        circ_size = 0.22
+        circ = slide.shapes.add_shape(
+            MSO_SHAPE.OVAL,
+            Inches(gap_cx - item_w / 2), Inches(legend_y + 0.04),
+            Inches(circ_size), Inches(circ_size),
+        )
+        circ.fill.solid(); circ.fill.fore_color.rgb = NAVY
+        circ.line.fill.background()
+        cp = circ.text_frame.paragraphs[0]
+        cp.text = num
+        cp.font.size = Pt(9); cp.font.bold = True; cp.font.color.rgb = WHITE
+        cp.alignment = PP_ALIGN.CENTER
+        circ.text_frame.margin_left = Inches(0); circ.text_frame.margin_right = Inches(0)
+        circ.text_frame.margin_top = Inches(0.02); circ.text_frame.margin_bottom = Inches(0)
+
+        # label text to the right of the circle
         lab = slide.shapes.add_textbox(
-            Inches(cx - 0.95), Inches(y + 0.05),
-            Inches(1.9), Inches(0.40),
+            Inches(gap_cx - item_w / 2 + circ_size + 0.06), Inches(legend_y),
+            Inches(item_w - circ_size - 0.06), Inches(0.32),
         )
         lp = lab.text_frame.paragraphs[0]
         lp.text = label
-        lp.font.size = Pt(11); lp.font.bold = True; lp.font.color.rgb = NAVY
-        lp.alignment = PP_ALIGN.CENTER
+        lp.font.size = Pt(12); lp.font.bold = True; lp.font.color.rgb = NAVY
+        lp.alignment = PP_ALIGN.LEFT
 
-    arrow_between(0, 1, "1", "campaign brief")
-    arrow_between(1, 2, "2", "attack (HTTP)")
-    arrow_between(2, 3, "3", "response")
-    arrow_between(3, 4, "4", "confirmed exploit")
-
-    # ─── Feedback arrow 5: Judge → Orchestrator (loops below) ───
-    feedback_y = BOX_Y + BOX_H + 0.95
+    # ─── Feedback arrow 5: Judge → Orchestrator (loops below the legend) ───
+    feedback_y = BOX_Y + BOX_H + 1.05
     judge_cx = box_x[3] + BOX_W / 2
     orch_cx = box_x[0] + BOX_W / 2
 
