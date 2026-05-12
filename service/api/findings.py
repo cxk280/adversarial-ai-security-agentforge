@@ -121,25 +121,132 @@ def _apply_override(finding: dict[str, Any], override: dict[str, Any] | None) ->
     }
 
 
+# Category → default severity mapping. Used for auto-generated
+# finding entries from the attempts table when no hand-authored
+# VULN-NNNN.md exists yet. The hand-authored markdown wins when the
+# Documentation Agent later "promotes" the auto-finding.
+_CATEGORY_SEVERITY: dict[str, str] = {
+    "data_exfiltration":          "critical",
+    "identity_role_exploitation": "high",
+    "prompt_injection":           "high",
+    "state_corruption":           "high",
+    "tool_misuse":                "medium",
+    "denial_of_service":          "medium",
+}
+
+
+def _exploit_findings_from_db() -> list[dict[str, Any]]:
+    """Surface every distinct seed_id with verdict='pass' as a finding.
+
+    Acts as the immediate-visibility fallback for the Documentation
+    Agent path (ARCHITECTURE §1.3) — when the Judges confirm an
+    exploit, the corresponding attempt row gets summarised here as a
+    AUTO-<seed_id> finding entry. Hand-authored VULN-NNNN.md files
+    take precedence (matched by attack_id), so the polished version
+    shadows the auto entry once it's been written.
+
+    Body content comes from the most recent passing attempt's
+    response_text — gives the reviewer the exact evidence the Judges
+    flagged, without waiting on the markdown writer.
+    """
+    with db.get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                seed_id,
+                category,
+                subcategory,
+                MIN(started_at) AS first_seen,
+                MAX(started_at) AS last_seen,
+                COUNT(*)        AS hit_count
+            FROM attempts
+            WHERE verdict = 'pass'
+            GROUP BY seed_id, category, subcategory
+            """,
+        ).fetchall()
+    out: list[dict[str, Any]] = []
+    for r in rows:
+        # Fetch the most-recent passing attempt's run_id + response_text
+        with db.get_conn() as conn:
+            latest = conn.execute(
+                """
+                SELECT run_id, response_text, started_at
+                FROM attempts
+                WHERE seed_id = ? AND verdict = 'pass'
+                ORDER BY started_at DESC
+                LIMIT 1
+                """,
+                (r["seed_id"],),
+            ).fetchone()
+        resp_text = (latest["response_text"] if latest else "") or ""
+        body = (
+            f"# AUTO — Confirmed exploit on seed `{r['seed_id']}`\n\n"
+            f"**Category:** {r['category']} / {r['subcategory']}  \n"
+            f"**First seen:** {r['first_seen']}  \n"
+            f"**Last seen:** {r['last_seen']}  \n"
+            f"**Confirmations:** {r['hit_count']} attempt(s) "
+            f"verdicted `pass` by the dual-Judge.  \n\n"
+            f"## Target response (most recent passing attempt)\n\n"
+            f"```\n{resp_text[:4000]}\n```\n\n"
+            f"_This is an auto-generated finding from the attempts table. "
+            f"A hand-authored `VULN-NNNN.md` will supersede this entry once "
+            f"the Documentation Agent promotes it (currently a manual step)._\n"
+        )
+        out.append({
+            "id": f"AUTO-{r['seed_id']}",
+            "title": f"Auto: exploit confirmed on {r['seed_id']}",
+            "severity": _CATEGORY_SEVERITY.get(r["category"], "high"),
+            "status": "open",
+            "category": r["category"],
+            "subcategory": r["subcategory"],
+            "discovered": r["first_seen"],
+            "target": "",
+            "attack_id": r["seed_id"],
+            "campaign_id": latest["run_id"] if latest else "",
+            "threat_model_ref": "",
+            "repro_summary": (
+                f"Confirmed exploit on {r['hit_count']} attempt(s); "
+                f"see {r['category']}/{r['subcategory']} seed."
+            ),
+            "body_markdown": body,
+        })
+    return out
+
+
 def _all_findings() -> list[dict[str, Any]]:
-    if not FINDINGS_DIR.exists():
-        return []
     overrides = db.list_finding_status_overrides()
-    items = []
-    for p in sorted(FINDINGS_DIR.glob("VULN-*.md")):
-        if not _FILENAME_RE.match(p.name):
+    items: list[dict[str, Any]] = []
+    claimed_attack_ids: set[str] = set()
+
+    # 1. Hand-authored markdown findings (source of truth).
+    if FINDINGS_DIR.exists():
+        for p in sorted(FINDINGS_DIR.glob("VULN-*.md")):
+            if not _FILENAME_RE.match(p.name):
+                continue
+            try:
+                parsed = _parse_finding(p)
+                items.append(_apply_override(parsed, overrides.get(parsed["id"])))
+                if parsed.get("attack_id"):
+                    # The parser sometimes leaves stray backticks on the
+                    # attack_id (legacy markdown formatting). Normalise
+                    # so the auto-finding dedupe lines up.
+                    claimed_attack_ids.add(parsed["attack_id"].strip("`").strip())
+            except Exception as exc:
+                items.append({
+                    "id": p.stem,
+                    "title": p.stem,
+                    "severity": "high",
+                    "status": "open",
+                    "_parse_error": str(exc),
+                })
+
+    # 2. Auto-generated findings from the attempts table. Any
+    # seed_id already covered by a hand-authored markdown is skipped.
+    for auto in _exploit_findings_from_db():
+        if auto["attack_id"].strip("`").strip() in claimed_attack_ids:
             continue
-        try:
-            parsed = _parse_finding(p)
-            items.append(_apply_override(parsed, overrides.get(parsed["id"])))
-        except Exception as exc:
-            items.append({
-                "id": p.stem,
-                "title": p.stem,
-                "severity": "high",
-                "status": "open",
-                "_parse_error": str(exc),
-            })
+        items.append(_apply_override(auto, overrides.get(auto["id"])))
+
     return items
 
 
@@ -153,12 +260,20 @@ async def list_findings(_token: str = Depends(require_bearer)) -> dict:
 
 @router.get("/findings/{finding_id}")
 async def get_finding(finding_id: str, _token: str = Depends(require_bearer)) -> dict:
-    """Get one finding by its VULN-NNNN id."""
+    """Get one finding by id. Supports both hand-authored VULN-NNNN
+    markdown files and auto-generated AUTO-<seed_id> entries derived
+    from the attempts table."""
+    override = db.get_finding_status_override(finding_id)
+    if finding_id.startswith("AUTO-"):
+        # Reconstruct from the attempts table on demand.
+        for auto in _exploit_findings_from_db():
+            if auto["id"] == finding_id:
+                return _apply_override(auto, override)
+        raise HTTPException(404, f"Finding {finding_id!r} not found")
     path = FINDINGS_DIR / f"{finding_id}.md"
     if not path.exists() or not _FILENAME_RE.match(path.name):
         raise HTTPException(404, f"Finding {finding_id!r} not found")
     parsed = _parse_finding(path)
-    override = db.get_finding_status_override(finding_id)
     return _apply_override(parsed, override)
 
 
@@ -185,12 +300,24 @@ async def update_finding_status(
             422,
             f"status must be one of {sorted(_VALID_STATUSES)}, got {payload.status!r}",
         )
-    path = FINDINGS_DIR / f"{finding_id}.md"
-    if not path.exists() or not _FILENAME_RE.match(path.name):
-        raise HTTPException(404, f"Finding {finding_id!r} not found")
+
+    # AUTO-<seed_id> entries don't have a markdown file — resolve them
+    # from the attempts table instead.
+    parsed: dict[str, Any] | None = None
+    if finding_id.startswith("AUTO-"):
+        for auto in _exploit_findings_from_db():
+            if auto["id"] == finding_id:
+                parsed = auto
+                break
+        if parsed is None:
+            raise HTTPException(404, f"Finding {finding_id!r} not found")
+    else:
+        path = FINDINGS_DIR / f"{finding_id}.md"
+        if not path.exists() or not _FILENAME_RE.match(path.name):
+            raise HTTPException(404, f"Finding {finding_id!r} not found")
+        parsed = _parse_finding(path)
 
     now = datetime.now(timezone.utc).isoformat()
-    parsed = _parse_finding(path)
     prior = db.get_finding_status_override(finding_id)
     prior_status = prior["status"] if prior else parsed["status"]
 
