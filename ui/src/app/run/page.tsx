@@ -1,14 +1,24 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
+import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
+import { submitRun, type Attempt } from "@/lib/api";
+import { useAttempts, useRun } from "@/hooks/use-runs";
+import { usd } from "@/lib/format";
 
 const TARGETS = [
   { id: "dev",  name: "dev",  url: "copilot-agent-dev.up.railway.app",        badge: null },
   { id: "qa",   name: "qa",   url: "copilot-agent-qa.up.railway.app",         badge: null },
   { id: "prod", name: "prod", url: "copilot-agent-production-41de.up.railway.app", badge: "ELEVATED" },
 ];
+
+const TARGET_URL: Record<string, string> = {
+  dev:  "https://copilot-agent-dev.up.railway.app",
+  qa:   "https://copilot-agent-qa.up.railway.app",
+  prod: "https://copilot-agent-production-41de.up.railway.app",
+};
 
 const CATEGORIES = [
   { id: "indirect",         name: "Indirect prompt injection",      seeds: 10, sev: 9,  priority: "TOP" },
@@ -31,6 +41,12 @@ export default function RunPage() {
     new Set(["indirect", "cross_patient", "direct", "persona_hijack"]),
   );
   const [mode, setMode] = useState("tap");
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [launchError, setLaunchError] = useState<string | null>(null);
+  const [launching, setLaunching] = useState(false);
+
+  const { data: runData } = useRun(activeRunId ?? undefined);
+  const { data: attemptsData } = useAttempts(activeRunId ?? undefined);
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -49,6 +65,34 @@ export default function RunPage() {
   const estUsd = (estCycles * 0.014).toFixed(2);
   const estMin = Math.max(2, Math.round(estCycles * 0.08));
 
+  const launch = async () => {
+    setLaunchError(null);
+    setLaunching(true);
+    try {
+      const resp = await submitRun({
+        target_url: TARGET_URL[target],
+        suite_ref: "promotion-gate-v1",
+        source: "manual",
+        max_seconds: estMin * 60 * 2,
+        budget_usd: Math.max(0.25, Number(estUsd)),
+      });
+      setActiveRunId(resp.run_id);
+    } catch (e) {
+      setLaunchError(e instanceof Error ? e.message : "Launch failed");
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  const isRunning =
+    runData?.state === "running" || runData?.state === "queued";
+  const isDone =
+    runData?.state === "completed" || runData?.state === "failed" || runData?.state === "cancelled";
+
+  const attempts = useMemo(() => {
+    return [...(attemptsData?.attempts ?? [])].reverse();
+  }, [attemptsData]);
+
   return (
     <div className="-mx-8 -my-6">
       <TopBar crumb="Ad Hoc Run" target="copilot-agent-dev" />
@@ -63,7 +107,6 @@ export default function RunPage() {
         <div className="grid grid-cols-[3fr_2fr] gap-5">
           {/* Form */}
           <section className="space-y-5 rounded-xl border border-slate-200 bg-white px-6 py-5">
-            {/* Targets */}
             <FieldGroup label="Target">
               <div className="flex gap-3">
                 {TARGETS.map((t) => (
@@ -71,11 +114,13 @@ export default function RunPage() {
                     key={t.id}
                     type="button"
                     onClick={() => setTarget(t.id)}
+                    disabled={!!activeRunId && isRunning}
                     className={cn(
                       "flex flex-1 flex-col gap-1.5 rounded-lg border-2 px-3.5 py-3 text-left",
                       target === t.id
                         ? "border-teal-600 bg-teal-50/50"
                         : "border-slate-200 bg-white hover:border-slate-300",
+                      activeRunId && isRunning ? "opacity-60" : "",
                     )}
                   >
                     <div className="flex items-center gap-2">
@@ -99,7 +144,6 @@ export default function RunPage() {
               </div>
             </FieldGroup>
 
-            {/* Categories */}
             <FieldGroup label="Attack Categories">
               <div className="space-y-2">
                 {CATEGORIES.map((c) => {
@@ -150,10 +194,9 @@ export default function RunPage() {
               </div>
             </FieldGroup>
 
-            {/* Mode */}
             <FieldGroup label="Attack Mode">
               <div className="grid grid-cols-3 gap-0 overflow-hidden rounded-lg border border-slate-200">
-                {MODES.map((m, i) => (
+                {MODES.map((m) => (
                   <button
                     key={m.id}
                     type="button"
@@ -173,7 +216,6 @@ export default function RunPage() {
               </div>
             </FieldGroup>
 
-            {/* Budget */}
             <FieldGroup label="Budget & Limits">
               <div className="grid grid-cols-4 gap-3">
                 <BudgetField label="USD CAP" value="$1.00" hint="of $5.00 daily" />
@@ -183,25 +225,34 @@ export default function RunPage() {
               </div>
             </FieldGroup>
 
-            {/* Actions */}
+            {launchError && (
+              <div className="rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-xs text-red-700">
+                {launchError}
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2.5">
               <button
                 type="button"
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50"
+                onClick={() => { setActiveRunId(null); setLaunchError(null); }}
+                disabled={!activeRunId || isRunning}
+                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-900 hover:bg-slate-50 disabled:opacity-50"
               >
-                Cancel
+                Reset
               </button>
               <button
                 type="button"
-                className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-700"
+                onClick={launch}
+                disabled={launching || isRunning}
+                className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
               >
                 <span>▶</span>
-                Launch campaign
+                {launching ? "Launching…" : isRunning ? "Running…" : "Launch campaign"}
               </button>
             </div>
           </section>
 
-          {/* Preview */}
+          {/* Preview / Live Stream */}
           <aside className="space-y-4">
             <div className="rounded-xl bg-slate-900 px-5 py-5 text-slate-100">
               <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
@@ -220,30 +271,154 @@ export default function RunPage() {
             <section className="rounded-xl border border-slate-200 bg-white">
               <header className="flex items-center justify-between border-b border-amber-50 px-5 py-3">
                 <h3 className="font-semibold text-slate-900">Live verdict stream</h3>
-                <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-                  <span className="h-2 w-2 rounded-full bg-slate-400" />
-                  Idle — launch to start streaming
-                </div>
+                <StatusDot
+                  state={
+                    !activeRunId ? "idle"
+                      : isRunning ? "running"
+                        : isDone ? "done" : "idle"
+                  }
+                />
               </header>
-              <div className="space-y-2 px-5 py-4 text-xs">
-                {[
-                  ["WAITING", "Awaiting launch…"],
-                  ["PREVIEW", "First attacks will dispatch against /chat with session_id=adv-<uuid>"],
-                  ["PREVIEW", "Each (attack, response) scored by Primary + Secondary judges; arbitrator on disagreement"],
-                  ["PREVIEW", "Verdicts will stream here via SSE; click any to jump to /runs/<campaign_id>"],
-                ].map(([tag, text], i) => (
-                  <div key={i} className="flex items-start gap-2">
-                    <span className="rounded border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
-                      {tag}
-                    </span>
-                    <span className="text-slate-600">{text}</span>
-                  </div>
-                ))}
-              </div>
+              <LiveStream
+                activeRunId={activeRunId}
+                attempts={attempts}
+                runState={runData?.state}
+                totals={runData?.totals}
+                spendUsd={runData?.spend_usd}
+              />
             </section>
           </aside>
         </div>
       </div>
+    </div>
+  );
+}
+
+function StatusDot({ state }: { state: "idle" | "running" | "done" }) {
+  if (state === "running") {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-500 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-500" />
+        </span>
+        Streaming…
+      </div>
+    );
+  }
+  if (state === "done") {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-green-700">
+        <span className="h-2 w-2 rounded-full bg-green-500" />
+        Complete
+      </div>
+    );
+  }
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+      <span className="h-2 w-2 rounded-full bg-slate-400" />
+      Idle — launch to start streaming
+    </div>
+  );
+}
+
+function LiveStream({
+  activeRunId,
+  attempts,
+  runState,
+  totals,
+  spendUsd,
+}: {
+  activeRunId: string | null;
+  attempts: Attempt[];
+  runState?: string;
+  totals?: { pass: number; fail: number; partial: number; inconclusive: number };
+  spendUsd?: number;
+}) {
+  if (!activeRunId) {
+    return (
+      <div className="space-y-2 px-5 py-4 text-xs">
+        {[
+          ["WAITING", "Awaiting launch…"],
+          ["PREVIEW", "Attacks dispatch against /chat with session_id=adv-<uuid>"],
+          ["PREVIEW", "Each (attack, response) scored by Primary + Secondary judges; arbitrator on disagreement"],
+          ["PREVIEW", "Verdicts stream here as attempts complete; click any row to jump to /runs/<campaign_id>"],
+        ].map(([tag, text], i) => (
+          <div key={i} className="flex items-start gap-2">
+            <span className="rounded border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
+              {tag}
+            </span>
+            <span className="text-slate-600">{text}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3 px-5 py-4 text-xs">
+      <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-2 text-[11px]">
+        <Link
+          href={`/runs/${activeRunId}`}
+          className="font-mono font-semibold text-teal-600 hover:underline"
+        >
+          {activeRunId}
+        </Link>
+        <div className="flex items-center gap-3 text-slate-600">
+          <span>state: <strong>{runState ?? "queued"}</strong></span>
+          <span>·</span>
+          <span>{usd(spendUsd ?? 0)}</span>
+        </div>
+      </div>
+      {totals && (
+        <div className="grid grid-cols-4 gap-2 text-center">
+          <Pill label="PASS"        value={totals.pass}        color="bg-red-50 text-red-700 border-red-200" />
+          <Pill label="HELD"        value={totals.fail}        color="bg-green-50 text-green-700 border-green-200" />
+          <Pill label="PARTIAL"     value={totals.partial}     color="bg-yellow-50 text-yellow-700 border-yellow-200" />
+          <Pill label="INCONCL."    value={totals.inconclusive} color="bg-slate-50 text-slate-600 border-slate-200" />
+        </div>
+      )}
+      <div className="max-h-[400px] space-y-1.5 overflow-auto">
+        {attempts.length === 0 && (
+          <div className="py-6 text-center text-[11px] text-slate-500">
+            Queued — first verdicts will appear within a few seconds…
+          </div>
+        )}
+        {attempts.map((a) => (
+          <div
+            key={a.attempt_id}
+            className="flex items-center gap-2 rounded border border-amber-50 bg-white px-2 py-1.5"
+          >
+            <span
+              className={cn(
+                "rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide",
+                a.verdict === "pass"
+                  ? "bg-red-100 text-red-700"
+                  : a.verdict === "fail"
+                    ? "bg-green-100 text-green-700"
+                    : a.verdict === "partial"
+                      ? "bg-yellow-100 text-yellow-700"
+                      : "bg-slate-100 text-slate-700",
+              )}
+            >
+              {a.verdict === "pass" ? "🚨 PASS" : a.verdict}
+            </span>
+            <span className="truncate text-[11px] text-slate-700">
+              <code className="text-slate-500">{a.seed_id}</code>
+              <span className="ml-1.5 text-slate-400">{a.subcategory}</span>
+            </span>
+            <span className="ml-auto text-[10px] text-slate-400">{a.latency_ms}ms</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function Pill({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div className={cn("rounded border px-2 py-1.5", color)}>
+      <div className="text-[9px] font-bold uppercase tracking-wide opacity-80">{label}</div>
+      <div className="text-base font-bold">{value}</div>
     </div>
   );
 }
