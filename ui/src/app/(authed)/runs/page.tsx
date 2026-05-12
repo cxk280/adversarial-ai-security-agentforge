@@ -7,13 +7,6 @@ import { relativeTime, usd } from "@/lib/format";
 import { useRuns } from "@/hooks/use-runs";
 import type { RunSummary } from "@/lib/api";
 
-const FILTERS = [
-  { label: "Source", value: "All" },
-  { label: "Target", value: "All" },
-  { label: "State",  value: "All" },
-  { label: "Window", value: "Last 7 days", valueColor: "text-teal-600" },
-];
-
 export default function RunsHistoryPage() {
   const { data, isLoading, error } = useRuns();
   const runs: RunSummary[] = data?.runs ?? [];
@@ -26,52 +19,19 @@ export default function RunsHistoryPage() {
     <div className="-mx-8 -my-6">
       <TopBar crumb="Run History" target="copilot-agent-dev" />
       <div className="space-y-5 px-8 py-6">
-        <div className="flex items-start justify-between">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-bold text-slate-900">Run history</h1>
-            <p className="text-sm text-slate-600">
-              {isLoading ? (
-                "Loading…"
-              ) : error ? (
-                <span className="text-red-600">API error · check ADVERSARY_API_TOKEN env</span>
-              ) : (
-                <>
-                  Last 7 days &nbsp;·&nbsp; {total} campaigns &nbsp;·&nbsp; {usd(totalCost)} total spend &nbsp;·&nbsp; {exploits} confirmed exploits &nbsp;·&nbsp; All replays available
-                </>
-              )}
-            </p>
-          </div>
-          <button
-            type="button"
-            className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-900 hover:bg-slate-50"
-          >
-            ↓ Export audit log
-          </button>
-        </div>
-
-        <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-3">
-          <div className="flex flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-amber-50/40 px-3 py-2">
-            <span className="text-sm text-slate-400">⌕</span>
-            <input
-              type="text"
-              placeholder="Search campaigns by ID, category, source, target SHA…"
-              className="flex-1 bg-transparent text-sm placeholder:text-slate-400 focus:outline-none"
-            />
-          </div>
-          {FILTERS.map((f) => (
-            <button
-              key={f.label}
-              type="button"
-              className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 hover:bg-slate-50"
-            >
-              <span className="text-[11px] text-slate-500">{f.label}</span>
-              <span className={cn(
-                "text-xs font-semibold",
-                f.valueColor ?? "text-slate-900",
-              )}>{f.value}</span>
-              <span className="text-[10px] text-slate-400">▾</span>
-            </button>
-          ))}
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold text-slate-900">Run history</h1>
+          <p className="text-sm text-slate-600">
+            {isLoading ? (
+              "Loading…"
+            ) : error ? (
+              <span className="text-red-600">API error · check ADVERSARY_API_TOKEN env</span>
+            ) : (
+              <>
+                {total} campaign{total === 1 ? "" : "s"} &nbsp;·&nbsp; {usd(totalCost)} total spend &nbsp;·&nbsp; {exploits} confirmed exploit{exploits === 1 ? "" : "s"}
+              </>
+            )}
+          </p>
         </div>
 
         <section className="rounded-xl border border-slate-200 bg-white">

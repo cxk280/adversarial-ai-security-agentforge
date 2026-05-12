@@ -1,35 +1,127 @@
+"use client";
+
+import { useMemo } from "react";
 import { TopBar } from "@/components/top-bar";
 import { KpiCard } from "@/components/kpi-card";
 import { FindingRow } from "@/components/finding-row";
 import { RecentRunsCard } from "@/components/recent-runs-card";
-import { FINDINGS, COVERAGE } from "@/lib/mock";
-
-function relativeTime(iso: string): string {
-  const ms = Date.now() - new Date(iso).getTime();
-  const m = Math.round(ms / 60000);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.round(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.round(h / 24)}d ago`;
-}
+import { useFindings, useRuns, useCoverage } from "@/hooks/use-runs";
+import { relativeTime, usd } from "@/lib/format";
 
 export default function DashboardPage() {
+  const { data: findingsData } = useFindings();
+  const { data: runsData } = useRuns();
+  const { data: coverageData } = useCoverage();
+
+  const findings = findingsData?.findings ?? [];
+  const runs = runsData?.runs ?? [];
+  const coverageRows = coverageData?.rows ?? [];
+
+  const stats = useMemo(() => {
+    const last = runs[0]; // listRuns returns most-recent-first
+    const openFindings = findings.filter(
+      (f) => f.status === "open" || f.status === "in_progress",
+    );
+    let totalPass = 0;
+    let totalFail = 0;
+    let totalPartial = 0;
+    let totalInconclusive = 0;
+    let spendToday = 0;
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    for (const r of runs) {
+      totalPass += r.totals?.pass ?? 0;
+      totalFail += r.totals?.fail ?? 0;
+      totalPartial += r.totals?.partial ?? 0;
+      totalInconclusive += r.totals?.inconclusive ?? 0;
+      const d = new Date(r.started_at);
+      if (!Number.isNaN(d.getTime()) && d >= startOfDay) spendToday += r.spend_usd ?? 0;
+    }
+    const totalAttacks = totalPass + totalFail + totalPartial + totalInconclusive;
+    const holdRate = totalAttacks === 0 ? null : totalFail / totalAttacks;
+    const testedSet = new Set(
+      coverageRows
+        .filter((c) => c.cases > 0)
+        .map((c) => `${c.category}/${c.subcategory}`),
+    );
+    return {
+      last,
+      openFindings,
+      holdRate,
+      totalAttacks,
+      testedCount: testedSet.size,
+      spendToday,
+    };
+  }, [findings, runs, coverageRows]);
+
+  const lastDescriptor = stats.last
+    ? `Last campaign ${relativeTime(stats.last.started_at)} · ${
+        (stats.last.totals?.pass ?? 0) +
+        (stats.last.totals?.fail ?? 0) +
+        (stats.last.totals?.partial ?? 0) +
+        (stats.last.totals?.inconclusive ?? 0)
+      } attacks · ${stats.last.totals?.pass ?? 0} confirmed exploits · ${usd(stats.last.spend_usd ?? 0)} spent`
+    : "No campaigns recorded yet. Kick one off from Ad Hoc Run.";
+
   return (
     <div className="-mx-8 -my-6">
       <TopBar crumb="Dashboard" target="copilot-agent-dev" />
       <div className="space-y-5 px-8 py-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold text-slate-900">Security posture overview</h1>
-          <p className="text-sm text-slate-600">
-            Last campaign 14 min ago &nbsp;·&nbsp; 57 attacks &nbsp;·&nbsp; 3 confirmed exploits &nbsp;·&nbsp; $0.18 spent
-          </p>
+          <p className="text-sm text-slate-600">{lastDescriptor}</p>
         </div>
 
         <div className="grid grid-cols-4 gap-4">
-          <KpiCard label="OPEN FINDINGS" value="3" delta="+3 today" tone="red" />
-          <KpiCard label="TARGET PASS RATE" value="94.7" unit="%" delta="↓ 1.3% vs yesterday" tone="orange" />
-          <KpiCard label="COVERAGE" value="4 / 17" unit=" subcat" delta="13 untested" tone="muted" />
-          <KpiCard label="TODAY'S SPEND" value="$0.18" unit=" of $5.00" delta="well under cap" tone="green" />
+          <KpiCard
+            label="OPEN FINDINGS"
+            value={String(stats.openFindings.length)}
+            delta={
+              stats.openFindings.length === 0
+                ? "all triaged"
+                : `${stats.openFindings.filter((f) => f.severity === "critical").length} critical, ${stats.openFindings.filter((f) => f.severity === "high").length} high`
+            }
+            tone={
+              stats.openFindings.some((f) => f.severity === "critical")
+                ? "red"
+                : stats.openFindings.length > 0
+                  ? "orange"
+                  : "green"
+            }
+          />
+          <KpiCard
+            label="TARGET HOLD RATE"
+            value={stats.holdRate === null ? "—" : (stats.holdRate * 100).toFixed(1)}
+            unit={stats.holdRate === null ? "" : "%"}
+            delta={
+              stats.totalAttacks === 0
+                ? "no campaigns yet"
+                : `${stats.totalAttacks} attacks total`
+            }
+            tone={
+              stats.holdRate === null
+                ? "muted"
+                : stats.holdRate >= 0.9
+                  ? "green"
+                  : stats.holdRate >= 0.7
+                    ? "orange"
+                    : "red"
+            }
+          />
+          <KpiCard
+            label="COVERAGE"
+            value={`${stats.testedCount} / 17`}
+            unit=" subcat"
+            delta={`${17 - stats.testedCount} untested`}
+            tone={stats.testedCount >= 8 ? "green" : stats.testedCount >= 4 ? "orange" : "muted"}
+          />
+          <KpiCard
+            label="TODAY'S SPEND"
+            value={usd(stats.spendToday)}
+            unit=" of $5.00"
+            delta="budget cap from ARCHITECTURE §3.3"
+            tone={stats.spendToday < 4 ? "green" : "orange"}
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-5">
@@ -41,9 +133,19 @@ export default function DashboardPage() {
               </a>
             </header>
             <div className="border-t border-amber-50">
-              {FINDINGS.map((f) => (
-                <FindingRow key={f.id} finding={f} when={relativeTime(f.discovered)} />
-              ))}
+              {findings.length === 0 ? (
+                <div className="px-5 py-8 text-center text-xs text-slate-500">
+                  No findings yet.
+                </div>
+              ) : (
+                findings.map((f) => (
+                  <FindingRow
+                    key={f.id}
+                    finding={f}
+                    when={f.discovered ? relativeTime(f.discovered) : "—"}
+                  />
+                ))
+              )}
             </div>
           </section>
 
@@ -61,7 +163,7 @@ export default function DashboardPage() {
             </div>
           </header>
           <div className="border-t border-amber-50 px-5 py-4">
-            <CoverageCompact />
+            <CoverageCompact rows={coverageRows} />
           </div>
         </section>
       </div>
@@ -77,6 +179,7 @@ const SUBCATEGORY_LABEL: Record<string, string> = {
   authorization_bypass:              "Authz bypass",
   phi_leakage:                       "PHI leakage",
   persona_hijack_clinical_authority: "Persona hijack",
+  persona_hijack:                    "Persona hijack",
   privilege_escalation:              "Priv escalation",
   history_manipulation:              "History manip",
   context_poisoning:                 "Context poison",
@@ -104,9 +207,17 @@ const COVERAGE_ORDER = [
   "denial_of_service",
 ];
 
-function CoverageCompact() {
-  const byCat = new Map<string, typeof COVERAGE>();
-  for (const c of COVERAGE) {
+interface CoverageRow {
+  category: string;
+  subcategory: string;
+  cases: number;
+  exploits: number;
+  held: number;
+}
+
+function CoverageCompact({ rows }: { rows: CoverageRow[] }) {
+  const byCat = new Map<string, CoverageRow[]>();
+  for (const c of rows) {
     if (!byCat.has(c.category)) byCat.set(c.category, []);
     byCat.get(c.category)!.push(c);
   }
@@ -124,15 +235,15 @@ function CoverageCompact() {
             <div className="text-xs font-medium text-slate-900">
               {CATEGORY_LABEL[cat] ?? cat}
             </div>
-            {padded.slice(0, SLOTS).map((c, idx) =>
+            {padded.slice(0, SLOTS).map((c: CoverageRow | null, idx: number) =>
               c ? (
                 <div
                   key={c.subcategory}
                   className={
                     "truncate rounded-md px-3 py-2 text-[11px] font-medium " +
-                    cellColor(c.cases, c.passRate)
+                    cellColor(c)
                   }
-                  title={`${c.subcategory} · sev ${c.severityWeight}`}
+                  title={`${c.subcategory} · ${c.cases} cases · ${c.exploits} exploit${c.exploits === 1 ? "" : "s"}`}
                 >
                   {SUBCATEGORY_LABEL[c.subcategory] ?? c.subcategory}
                 </div>
@@ -143,6 +254,12 @@ function CoverageCompact() {
           </div>
         );
       })}
+      {rows.length === 0 && (
+        <div className="py-4 text-center text-[11px] text-slate-500">
+          No campaigns recorded yet — every category will appear as untested
+          until the first run lands.
+        </div>
+      )}
     </div>
   );
 }
@@ -150,8 +267,7 @@ function CoverageCompact() {
 function CoverageLegend() {
   const items = [
     { color: "bg-red-500",    label: "≥1 exploit" },
-    { color: "bg-orange-500", label: "partial" },
-    { color: "bg-yellow-200", label: "tested" },
+    { color: "bg-orange-500", label: "partial held" },
     { color: "bg-green-200",  label: "clean" },
     { color: "bg-amber-50",   label: "untested" },
   ];
@@ -167,10 +283,10 @@ function CoverageLegend() {
   );
 }
 
-function cellColor(cases: number, passRate: number): string {
-  if (cases === 0) return "bg-amber-50/80 text-slate-700";
-  if (passRate < 0.5) return "bg-red-500 text-white";
-  if (passRate < 0.9) return "bg-orange-500 text-white";
-  if (passRate < 1.0) return "bg-yellow-200 text-slate-900";
-  return "bg-green-200 text-slate-900";
+function cellColor(c: CoverageRow): string {
+  if (c.cases === 0) return "bg-amber-50/80 text-slate-700";
+  if (c.exploits > 0) return "bg-red-500 text-white";
+  const heldRate = c.held / c.cases;
+  if (heldRate >= 0.95) return "bg-green-200 text-slate-900";
+  return "bg-orange-500 text-white";
 }

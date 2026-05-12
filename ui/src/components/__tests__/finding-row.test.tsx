@@ -1,9 +1,9 @@
 import { describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { FindingRow } from "@/components/finding-row";
-import type { Finding } from "@/lib/mock";
+import type { FindingSummary } from "@/lib/api";
 
-const FINDING: Finding = {
+const FINDING: FindingSummary = {
   id: "VULN-0001",
   title: "Cross-patient medication query honored",
   severity: "critical",
@@ -11,8 +11,8 @@ const FINDING: Finding = {
   category: "data_exfiltration",
   subcategory: "cross_patient_leakage",
   discovered: "2026-05-11T17:14:16Z",
-  reproSummary: "test",
-  attackId: "xpat-001",
+  repro_summary: "test",
+  attack_id: "xpat-001",
 };
 
 describe("FindingRow", () => {
@@ -33,7 +33,7 @@ describe("FindingRow", () => {
   });
 
   it("respects severity prop — high finding shows the high badge", () => {
-    const high: Finding = { ...FINDING, severity: "high" };
+    const high: FindingSummary = { ...FINDING, severity: "high" };
     render(<FindingRow finding={high} when="1h" />);
     expect(screen.getByTestId("severity-badge-high")).toBeInTheDocument();
     expect(screen.queryByTestId("severity-badge-critical")).toBeNull();
