@@ -135,20 +135,79 @@ _CATEGORY_SEVERITY: dict[str, str] = {
 }
 
 
-def _exploit_findings_from_db() -> list[dict[str, Any]]:
-    """Surface every distinct seed_id with verdict='pass' as a finding.
+def _next_vuln_id(claimed: set[str]) -> str:
+    """Allocate the next VULN-NNNN id not in `claimed`."""
+    n = 1
+    while f"VULN-{n:04d}" in claimed:
+        n += 1
+    return f"VULN-{n:04d}"
 
-    Two body sources, prefer-most-polished:
-      1. Documentation Agent output (Sonnet-generated; persisted in
-         documentation_agent_outputs by service/runner.py at end of
-         each campaign). Includes a real title, severity assessment,
-         and a full VULN-NNNN-shape writeup.
-      2. Fallback stub when the Doc Agent hasn't written one yet —
-         renders the raw response_text so the reviewer can see the
-         evidence immediately.
 
-    Hand-authored VULN-NNNN.md files take precedence over both
-    (matched by attack_id by the caller).
+def _all_claimed_vuln_ids() -> set[str]:
+    """Every VULN-NNNN id currently in use, across on-disk markdown
+    files and DB-allocated rows. Used by allocators to avoid handing
+    out a duplicate."""
+    claimed: set[str] = set()
+    if FINDINGS_DIR.exists():
+        for p in FINDINGS_DIR.glob("VULN-*.md"):
+            if _FILENAME_RE.match(p.name):
+                claimed.add(p.stem)
+    for doc in db.list_doc_agent_outputs().values():
+        if doc.get("assigned_vuln_id"):
+            claimed.add(doc["assigned_vuln_id"])
+    return claimed
+
+
+def allocate_vuln_id_for(attack_id: str) -> str:
+    """Idempotent: return the existing assigned_vuln_id for an
+    attack_id if one is already persisted; allocate + persist a new
+    one otherwise. Used by both the /findings list endpoint (lazy
+    allocation at read time) and the runner's Doc Agent step (eager
+    allocation so the rendered markdown gets the right id baked in).
+
+    The DocAgent body still gets written by the runner via
+    upsert_doc_agent_output; this only handles the id reservation.
+    """
+    existing = db.get_doc_agent_output(attack_id)
+    if existing and existing.get("assigned_vuln_id"):
+        return existing["assigned_vuln_id"]
+    vuln_id = _next_vuln_id(_all_claimed_vuln_ids())
+    if existing:
+        db.set_doc_agent_vuln_id(attack_id, vuln_id)
+    else:
+        # Reserve via a minimal stub row. The runner will upsert real
+        # title/body/severity over this when (and if) the Doc Agent
+        # generates a writeup.
+        now_iso_str = datetime.now(timezone.utc).isoformat()
+        db.upsert_doc_agent_output({
+            "attack_id":        attack_id,
+            "title":            f"Exploit on {attack_id}",
+            "severity":         "high",
+            "body_markdown":    "",
+            "campaign_id":      "",
+            "model":            "",
+            "generated_at":     now_iso_str,
+            "status":           "absent",
+            "assigned_vuln_id": vuln_id,
+        })
+    return vuln_id
+
+
+def _exploit_findings_from_db(claimed_ids: set[str]) -> list[dict[str, Any]]:
+    """Surface every distinct seed_id with verdict='pass' as a finding,
+    rendered under a stable VULN-NNNN identifier.
+
+    ID allocation: each attack_id gets a VULN-NNNN number persisted to
+    documentation_agent_outputs.assigned_vuln_id on first encounter.
+    Subsequent requests return the same id even if the row is later
+    updated by the Doc Agent. `claimed_ids` is the set of ids already
+    used by hand-authored markdown or previously-allocated DB rows.
+
+    Body sources, prefer-most-polished:
+      1. Documentation Agent output (status='completed') — the
+         Sonnet-generated VULN-NNNN-shape writeup
+      2. In-progress / failed stubs — banner above the raw response
+      3. Bare stub when no doc row exists yet
     """
     with db.get_conn() as conn:
         rows = conn.execute(
@@ -231,8 +290,13 @@ def _exploit_findings_from_db() -> list[dict[str, Any]]:
                 f"see {r['category']}/{r['subcategory']} seed."
             )
 
+            # Allocate stable VULN-NNNN id for this attack_id (persisted
+        # so it stays the same across requests).
+        vuln_id = allocate_vuln_id_for(seed_id)
+        claimed_ids.add(vuln_id)
+
         out.append({
-            "id": f"AUTO-{seed_id}",
+            "id": vuln_id,
             "title": title,
             "severity": severity,
             "status": "open",
@@ -245,7 +309,7 @@ def _exploit_findings_from_db() -> list[dict[str, Any]]:
             "threat_model_ref": "",
             "repro_summary": repro,
             "body_markdown": body,
-            # New: surface the Doc Agent lifecycle so the UI can render
+            # Surface the Doc Agent lifecycle so the UI can render
             # a pill/spinner. "absent" means no row in the table yet.
             "doc_agent_status": doc_status,
         })
@@ -256,6 +320,7 @@ def _all_findings() -> list[dict[str, Any]]:
     overrides = db.list_finding_status_overrides()
     items: list[dict[str, Any]] = []
     claimed_attack_ids: set[str] = set()
+    claimed_ids: set[str] = set()  # all VULN-NNNN strings in use
 
     # 1. Hand-authored markdown findings (source of truth).
     if FINDINGS_DIR.exists():
@@ -265,10 +330,8 @@ def _all_findings() -> list[dict[str, Any]]:
             try:
                 parsed = _parse_finding(p)
                 items.append(_apply_override(parsed, overrides.get(parsed["id"])))
+                claimed_ids.add(parsed["id"])
                 if parsed.get("attack_id"):
-                    # The parser sometimes leaves stray backticks on the
-                    # attack_id (legacy markdown formatting). Normalise
-                    # so the auto-finding dedupe lines up.
                     claimed_attack_ids.add(parsed["attack_id"].strip("`").strip())
             except Exception as exc:
                 items.append({
@@ -278,10 +341,19 @@ def _all_findings() -> list[dict[str, Any]]:
                     "status": "open",
                     "_parse_error": str(exc),
                 })
+                claimed_ids.add(p.stem)
 
-    # 2. Auto-generated findings from the attempts table. Any
-    # seed_id already covered by a hand-authored markdown is skipped.
-    for auto in _exploit_findings_from_db():
+    # Pre-claim any VULN ids already allocated to doc_agent_outputs
+    # rows so we don't accidentally hand the same number to a new
+    # exploit on this request.
+    for doc in db.list_doc_agent_outputs().values():
+        if doc.get("assigned_vuln_id"):
+            claimed_ids.add(doc["assigned_vuln_id"])
+
+    # 2. DB-derived findings — every exploit gets a VULN-NNNN id
+    # allocated on first encounter and persisted. Any seed_id already
+    # covered by a hand-authored markdown is shadowed.
+    for auto in _exploit_findings_from_db(claimed_ids):
         if auto["attack_id"].strip("`").strip() in claimed_attack_ids:
             continue
         items.append(_apply_override(auto, overrides.get(auto["id"])))
@@ -299,21 +371,27 @@ async def list_findings(_token: str = Depends(require_bearer)) -> dict:
 
 @router.get("/findings/{finding_id}")
 async def get_finding(finding_id: str, _token: str = Depends(require_bearer)) -> dict:
-    """Get one finding by id. Supports both hand-authored VULN-NNNN
-    markdown files and auto-generated AUTO-<seed_id> entries derived
-    from the attempts table."""
+    """Get one finding by id. Resolves first against hand-authored
+    VULN-NNNN.md files on disk, then against DB-allocated VULN-NNNN
+    ids in the documentation_agent_outputs table."""
     override = db.get_finding_status_override(finding_id)
-    if finding_id.startswith("AUTO-"):
-        # Reconstruct from the attempts table on demand.
-        for auto in _exploit_findings_from_db():
-            if auto["id"] == finding_id:
-                return _apply_override(auto, override)
-        raise HTTPException(404, f"Finding {finding_id!r} not found")
+
+    # 1. On-disk markdown.
     path = FINDINGS_DIR / f"{finding_id}.md"
-    if not path.exists() or not _FILENAME_RE.match(path.name):
-        raise HTTPException(404, f"Finding {finding_id!r} not found")
-    parsed = _parse_finding(path)
-    return _apply_override(parsed, override)
+    if path.exists() and _FILENAME_RE.match(path.name):
+        parsed = _parse_finding(path)
+        return _apply_override(parsed, override)
+
+    # 2. DB-allocated VULN-NNNN.
+    doc_row = db.get_doc_agent_output_by_vuln_id(finding_id)
+    if doc_row:
+        # Resolve through _all_findings so the body/title/severity
+        # rendering stays consistent with the list endpoint.
+        for f in _all_findings():
+            if f["id"] == finding_id:
+                return _apply_override(f, override)
+
+    raise HTTPException(404, f"Finding {finding_id!r} not found")
 
 
 class StatusPatch(BaseModel):
@@ -340,21 +418,19 @@ async def update_finding_status(
             f"status must be one of {sorted(_VALID_STATUSES)}, got {payload.status!r}",
         )
 
-    # AUTO-<seed_id> entries don't have a markdown file — resolve them
-    # from the attempts table instead.
+    # Resolve the finding — on-disk markdown first, then any
+    # DB-allocated VULN-NNNN entry.
     parsed: dict[str, Any] | None = None
-    if finding_id.startswith("AUTO-"):
-        for auto in _exploit_findings_from_db():
-            if auto["id"] == finding_id:
-                parsed = auto
-                break
-        if parsed is None:
-            raise HTTPException(404, f"Finding {finding_id!r} not found")
-    else:
-        path = FINDINGS_DIR / f"{finding_id}.md"
-        if not path.exists() or not _FILENAME_RE.match(path.name):
-            raise HTTPException(404, f"Finding {finding_id!r} not found")
+    path = FINDINGS_DIR / f"{finding_id}.md"
+    if path.exists() and _FILENAME_RE.match(path.name):
         parsed = _parse_finding(path)
+    elif db.get_doc_agent_output_by_vuln_id(finding_id):
+        for f in _all_findings():
+            if f["id"] == finding_id:
+                parsed = f
+                break
+    if parsed is None:
+        raise HTTPException(404, f"Finding {finding_id!r} not found")
 
     now = datetime.now(timezone.utc).isoformat()
     prior = db.get_finding_status_override(finding_id)

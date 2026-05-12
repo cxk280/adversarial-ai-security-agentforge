@@ -98,13 +98,19 @@ CREATE TABLE IF NOT EXISTS documentation_agent_outputs (
     model         TEXT NOT NULL,
     generated_at  TEXT NOT NULL,
     -- Tracks the Documentation Agent's lifecycle for this attack_id:
+    --   absent       Doc Agent skipped (e.g. ANTHROPIC_API_KEY unset),
+    --                row exists only to reserve the assigned_vuln_id
     --   in_progress  Sonnet call in flight; body is a placeholder
     --   completed    body_markdown holds the polished writeup
     --   failed       body_markdown holds an error stub; generated_at
     --                is the failure time
     -- The findings API uses this to surface a "writing…" indicator
     -- while the agent is still working.
-    status        TEXT NOT NULL DEFAULT 'completed'
+    status            TEXT NOT NULL DEFAULT 'completed',
+    -- Stable VULN-NNNN identifier allocated when this exploit first
+    -- appears in /findings. Persisted so the same exploit keeps the
+    -- same id across requests + redeploys.
+    assigned_vuln_id  TEXT
 );
 
 -- Finding status overlay. The on-disk VULN-NNNN.md is the source of
@@ -138,11 +144,24 @@ def init_db() -> None:
         for ddl in (
             "ALTER TABLE regression_runs ADD COLUMN langfuse_trace_url TEXT",
             "ALTER TABLE documentation_agent_outputs ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'",
+            "ALTER TABLE documentation_agent_outputs ADD COLUMN assigned_vuln_id TEXT",
         ):
             try:
                 conn.execute(ddl)
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+        # One-shot cleanup of legacy AUTO-* identifiers from a previous
+        # iteration where auto-generated findings used a different
+        # prefix. Every finding is now a VULN-NNNN; AUTO-* overrides
+        # are orphans (their target id no longer exists), so we drop
+        # them rather than leave silently-non-applying rows behind.
+        try:
+            conn.execute(
+                "DELETE FROM finding_status_overrides WHERE finding_id LIKE 'AUTO-%'"
+            )
+        except sqlite3.OperationalError:
+            pass
 
 
 # ─── Run helpers ─────────────────────────────────────────────────────
@@ -243,15 +262,17 @@ def upsert_doc_agent_output(row: dict[str, Any]) -> None:
     """Insert-or-update the Doc Agent writeup for an attack_id. Row
     must include attack_id, title, severity, body_markdown,
     campaign_id, model, generated_at. Optionally `status` (default
-    'completed')."""
-    payload = {"status": "completed", **row}
+    'completed') and `assigned_vuln_id`."""
+    payload = {"status": "completed", "assigned_vuln_id": None, **row}
     with get_conn() as conn:
         conn.execute(
             """
             INSERT INTO documentation_agent_outputs
-                (attack_id, title, severity, body_markdown, campaign_id, model, generated_at, status)
+                (attack_id, title, severity, body_markdown, campaign_id,
+                 model, generated_at, status, assigned_vuln_id)
             VALUES
-                (:attack_id, :title, :severity, :body_markdown, :campaign_id, :model, :generated_at, :status)
+                (:attack_id, :title, :severity, :body_markdown, :campaign_id,
+                 :model, :generated_at, :status, :assigned_vuln_id)
             ON CONFLICT(attack_id) DO UPDATE SET
                 title         = excluded.title,
                 severity      = excluded.severity,
@@ -259,10 +280,36 @@ def upsert_doc_agent_output(row: dict[str, Any]) -> None:
                 campaign_id   = excluded.campaign_id,
                 model         = excluded.model,
                 generated_at  = excluded.generated_at,
-                status        = excluded.status
+                status        = excluded.status,
+                -- Don't overwrite an already-allocated vuln_id with
+                -- NULL — the allocation is permanent.
+                assigned_vuln_id = COALESCE(excluded.assigned_vuln_id, documentation_agent_outputs.assigned_vuln_id)
             """,
             payload,
         )
+
+
+def set_doc_agent_vuln_id(attack_id: str, vuln_id: str) -> None:
+    """Persist the allocated VULN-NNNN id for an attack_id without
+    touching any other fields. Used by the findings allocator path
+    when no doc-agent body has been generated yet."""
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE documentation_agent_outputs SET assigned_vuln_id = ? WHERE attack_id = ?",
+            (vuln_id, attack_id),
+        )
+
+
+def get_doc_agent_output_by_vuln_id(vuln_id: str) -> dict[str, Any] | None:
+    """Reverse lookup: find the Doc Agent row whose assigned_vuln_id
+    matches. Used by GET /findings/{id} when the id starts with VULN-
+    but no markdown file exists on disk."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM documentation_agent_outputs WHERE assigned_vuln_id = ?",
+            (vuln_id,),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def get_finding_status_override(finding_id: str) -> dict[str, Any] | None:

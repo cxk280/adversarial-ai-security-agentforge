@@ -31,6 +31,7 @@ from agents.documentation.sonnet_writer import (
     DocumentationAgent,
     ExploitContext,
 )
+from service.api.findings import allocate_vuln_id_for
 from agents.red_team.escalation import CampaignState
 from agents.red_team.seed_dispatcher import Attack, SeedDispatcher
 from harness import CoPilotExecutor, new_session_id, run_assertions
@@ -357,23 +358,30 @@ async def _run_documentation_agent(
     # Sonnet call returns. Capped so a campaign with many exploits
     # doesn't burn unbounded Sonnet spend.
     targets = new_attack_ids[:capped]
+    # Eagerly allocate the VULN-NNNN id for each target so the Doc
+    # Agent's rendered markdown can bake in the real id, not a
+    # placeholder. The allocator is idempotent — already-assigned ids
+    # are returned as-is.
+    vuln_ids = {sid: allocate_vuln_id_for(sid) for sid in targets}
     for sid in targets:
-        att = confirmed[sid]
         db.upsert_doc_agent_output({
-            "attack_id":     sid,
-            "title":         f"Documentation Agent writing… ({sid})",
-            "severity":      "high",  # placeholder until real assessment lands
-            "body_markdown": "",
-            "campaign_id":   run_id,
-            "model":         DocumentationAgent.model_name,
-            "generated_at":  now_iso(),
-            "status":        "in_progress",
+            "attack_id":        sid,
+            "title":            f"Documentation Agent writing… ({vuln_ids[sid]})",
+            "severity":         "high",  # placeholder until Sonnet assesses
+            "body_markdown":    "",
+            "campaign_id":      run_id,
+            "model":            DocumentationAgent.model_name,
+            "generated_at":     now_iso(),
+            "status":           "in_progress",
+            "assigned_vuln_id": vuln_ids[sid],
         })
 
     for sid in targets:
         att = confirmed[sid]
+        vuln_id = vuln_ids[sid]
         ctx = ExploitContext(
             attack_id=sid,
+            vuln_id=vuln_id,
             category=att.get("category", ""),
             subcategory=att.get("subcategory", ""),
             target_url=target_url,
@@ -389,9 +397,9 @@ async def _run_documentation_agent(
         except DocAgentError as exc:
             print(f"[doc-agent] write({sid}) failed: {exc}")
             db.upsert_doc_agent_output({
-                "attack_id":     sid,
-                "title":         f"Documentation Agent failed ({sid})",
-                "severity":      "high",
+                "attack_id":        sid,
+                "title":            f"Documentation Agent failed ({vuln_id})",
+                "severity":         "high",
                 "body_markdown": (
                     f"_The Documentation Agent (Claude Sonnet 4.6) failed to "
                     f"generate a writeup for this exploit. Error: {exc}\n\n"
@@ -399,26 +407,28 @@ async def _run_documentation_agent(
                     f"in the doc-generation step. Re-trigger by re-running "
                     f"the campaign that found seed `{sid}`._\n"
                 ),
-                "campaign_id":   run_id,
-                "model":         DocumentationAgent.model_name,
-                "generated_at":  now_iso(),
-                "status":        "failed",
+                "campaign_id":      run_id,
+                "model":            DocumentationAgent.model_name,
+                "generated_at":     now_iso(),
+                "status":           "failed",
+                "assigned_vuln_id": vuln_id,
             })
             continue
         # Extract a one-line title from the first H1.
         title = _extract_title(body) or f"Exploit on {sid}"
         severity = _extract_severity(body) or "high"
         db.upsert_doc_agent_output({
-            "attack_id":     sid,
-            "title":         title,
-            "severity":      severity,
-            "body_markdown": body,
-            "campaign_id":   run_id,
-            "model":         agent.model_name,
-            "generated_at":  now_iso(),
-            "status":        "completed",
+            "attack_id":        sid,
+            "title":            title,
+            "severity":         severity,
+            "body_markdown":    body,
+            "campaign_id":      run_id,
+            "model":            agent.model_name,
+            "generated_at":     now_iso(),
+            "status":           "completed",
+            "assigned_vuln_id": vuln_id,
         })
-        print(f"[doc-agent] wrote AUTO-{sid} (severity={severity})")
+        print(f"[doc-agent] wrote {vuln_id} (severity={severity})")
 
 
 @lru_cache(maxsize=512)
