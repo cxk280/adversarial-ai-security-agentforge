@@ -83,6 +83,20 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at  TEXT NOT NULL
 );
 
+-- Finding status overlay. The on-disk VULN-NNNN.md is the source of
+-- truth for content (title, severity, body, repro); status is the one
+-- field that can be mutated at runtime via PATCH /findings/{id}/status.
+-- This table stores those mutations; the API joins it into the
+-- response so the UI sees the live status without needing a redeploy.
+CREATE TABLE IF NOT EXISTS finding_status_overrides (
+    finding_id  TEXT PRIMARY KEY,
+    status      TEXT NOT NULL,
+    changed_at  TEXT NOT NULL,
+    changed_by  TEXT,
+    commit_sha  TEXT,
+    rationale   TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_runs_started_at ON regression_runs(started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_runs_target     ON regression_runs(target_url);
 CREATE INDEX IF NOT EXISTS idx_attempts_run    ON attempts(run_id);
@@ -169,6 +183,55 @@ def list_attempts(run_id: str) -> list[dict[str, Any]]:
             (run_id,),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+def get_finding_status_override(finding_id: str) -> dict[str, Any] | None:
+    """Return the override row for a finding, or None if no override exists.
+    The API merges this on top of the markdown-parsed status when serving
+    GET /findings."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM finding_status_overrides WHERE finding_id = ?",
+            (finding_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_finding_status_overrides() -> dict[str, dict[str, Any]]:
+    """All overrides as {finding_id → row}. Used by the list endpoint to
+    apply overrides in a single round-trip per request."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT * FROM finding_status_overrides",
+        ).fetchall()
+    return {r["finding_id"]: dict(r) for r in rows}
+
+
+def upsert_finding_status_override(row: dict[str, Any]) -> None:
+    """Insert-or-update the override for a single finding. `row` must
+    include finding_id, status, changed_at; changed_by/commit_sha/
+    rationale are optional."""
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO finding_status_overrides
+                (finding_id, status, changed_at, changed_by, commit_sha, rationale)
+            VALUES
+                (:finding_id, :status, :changed_at, :changed_by, :commit_sha, :rationale)
+            ON CONFLICT(finding_id) DO UPDATE SET
+                status     = excluded.status,
+                changed_at = excluded.changed_at,
+                changed_by = excluded.changed_by,
+                commit_sha = excluded.commit_sha,
+                rationale  = excluded.rationale
+            """,
+            {
+                "changed_by": None,
+                "commit_sha": None,
+                "rationale": None,
+                **row,
+            },
+        )
 
 
 def coverage_by_subcategory() -> list[dict[str, Any]]:

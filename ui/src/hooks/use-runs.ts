@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listRuns,
   getRun,
@@ -9,7 +9,9 @@ import {
   getFinding,
   listAttempts,
   getCoverage,
+  updateFindingStatus,
   type RunSummary,
+  type FindingSummary,
 } from "@/lib/api";
 
 
@@ -73,5 +75,23 @@ export function useCoverage() {
     queryKey: ["coverage"],
     queryFn: () => getCoverage(),
     refetchInterval: 30_000,
+  });
+}
+
+/** Mutation hook for PATCH /findings/{id}/status. Optimistically
+ *  invalidates the affected single-finding + list queries so the UI
+ *  reflects the new status without a manual refresh. */
+export function useUpdateFindingStatus(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      status: FindingSummary["status"];
+      commit_sha?: string;
+      rationale?: string;
+    }) => updateFindingStatus(id, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["finding", id] });
+      qc.invalidateQueries({ queryKey: ["findings"] });
+    },
   });
 }

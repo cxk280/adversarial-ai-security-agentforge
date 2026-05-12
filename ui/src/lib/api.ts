@@ -145,6 +145,12 @@ export interface FindingDetail extends FindingSummary {
   target?: string;
   campaign_id?: string;
   threat_model_ref?: string;
+  status_history?: {
+    changed_at: string;
+    changed_by?: string;
+    commit_sha?: string;
+    rationale?: string;
+  };
 }
 
 export function listFindings(): Promise<{ findings: FindingSummary[]; count: number }> {
@@ -153,6 +159,16 @@ export function listFindings(): Promise<{ findings: FindingSummary[]; count: num
 
 export function getFinding(id: string): Promise<FindingDetail> {
   return request(`/findings/${encodeURIComponent(id)}`);
+}
+
+export function updateFindingStatus(
+  id: string,
+  body: { status: FindingSummary["status"]; commit_sha?: string; rationale?: string },
+): Promise<FindingDetail> {
+  return request(`/findings/${encodeURIComponent(id)}/status`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
 }
 
 
