@@ -40,10 +40,11 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy application code. .dockerignore filters out node_modules,
 # .next, .git, design/, tests/, etc. — anything that doesn't belong in
 # the runtime image.
-COPY agents/  ./agents/
-COPY harness/ ./harness/
-COPY service/ ./service/
-COPY evals/   ./evals/
+COPY agents/   ./agents/
+COPY harness/  ./harness/
+COPY service/  ./service/
+COPY evals/    ./evals/
+COPY findings/ ./findings/
 
 # Make sure the SQLite DB lives in a writable path. On Railway the
 # working directory is writable and we don't (yet) attach a volume —
