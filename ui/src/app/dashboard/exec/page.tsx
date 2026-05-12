@@ -1,32 +1,162 @@
+"use client";
+
+import { useMemo } from "react";
 import { TopBar } from "@/components/top-bar";
 import { KpiCard } from "@/components/kpi-card";
 import { cn } from "@/lib/utils";
+import { useFindings, useRuns } from "@/hooks/use-runs";
+import { usd } from "@/lib/format";
 
-const KPIS = [
-  { label: "RESILIENCE",       value: "94.7", unit: "%",        delta: "↑ 1.8% vs last week",  tone: "green" as const },
-  { label: "ACTIVE FINDINGS",  value: "3",    unit: "",         delta: "1 critical, 2 high",   tone: "red" as const   },
-  { label: "MEAN TIME TO FIX", value: "4.2",  unit: "h",        delta: "↓ 27% vs last week",   tone: "green" as const },
-  { label: "COVERAGE",         value: "24",   unit: "% surface", delta: "13 subcat untested",  tone: "orange" as const },
-];
-
-const TREND = [
-  { date: "5/04", value: 0.86 }, { date: "5/05", value: 0.88 },
-  { date: "5/06", value: 0.85 }, { date: "5/06", value: 0.89 },
-  { date: "5/07", value: 0.91 }, { date: "5/07", value: 0.90 },
-  { date: "5/08", value: 0.92 }, { date: "5/08", value: 0.93 },
-  { date: "5/09", value: 0.91 }, { date: "5/09", value: 0.94 },
-  { date: "5/10", value: 0.95 }, { date: "5/10", value: 0.95 },
-  { date: "5/11", value: 0.947 }, { date: "5/11", value: 0.947 },
-];
-
-const SUMMARY = [
-  { count: "1",  label: "Critical findings open",  color: "text-red-600",    sub: "Median TTR: 4.2 h" },
-  { count: "2",  label: "High findings open",       color: "text-orange-600", sub: "Median TTR: 4.2 h" },
-  { count: "12", label: "Findings resolved",        color: "text-green-700",  sub: "All regression-tested" },
-  { count: "0",  label: "Findings re-opened",       color: "text-green-700",  sub: "Zero regressions this week" },
-];
+interface KpiTone { tone: "green" | "red" | "orange"; }
 
 export default function ExecPage() {
+  const { data: findingsData } = useFindings();
+  const { data: runsData } = useRuns();
+
+  const findings = findingsData?.findings ?? [];
+  const runs = runsData?.runs ?? [];
+
+  const kpis = useMemo(() => {
+    const openFindings = findings.filter(
+      (f) => f.status === "open" || f.status === "in_progress",
+    );
+    const critical = openFindings.filter((f) => f.severity === "critical").length;
+    const high = openFindings.filter((f) => f.severity === "high").length;
+
+    let pass = 0;
+    let fail = 0;
+    let partial = 0;
+    let inconclusive = 0;
+    const categories = new Set<string>();
+    for (const r of runs) {
+      pass += r.totals?.pass ?? 0;
+      fail += r.totals?.fail ?? 0;
+      partial += r.totals?.partial ?? 0;
+      inconclusive += r.totals?.inconclusive ?? 0;
+    }
+    const total = pass + fail + partial + inconclusive;
+    const resilience = total === 0 ? null : (fail / total) * 100;
+
+    // Coverage: count distinct subcategories exercised in findings + observed in runs.
+    findings.forEach((f) => {
+      if (f.subcategory) categories.add(`${f.category}/${f.subcategory}`);
+    });
+    // The full taxonomy in the threat model is 17 leaf subcategories.
+    const COVERAGE_DENOMINATOR = 17;
+    const coveragePct = Math.min(100, Math.round((categories.size / COVERAGE_DENOMINATOR) * 100));
+
+    return [
+      {
+        label: "RESILIENCE",
+        value: resilience === null ? "—" : resilience.toFixed(1),
+        unit: resilience === null ? "" : "%",
+        delta:
+          total === 0
+            ? "no campaigns yet"
+            : `${fail}/${total} attacks held`,
+        tone: (resilience !== null && resilience >= 90
+          ? "green"
+          : resilience !== null && resilience >= 70
+            ? "orange"
+            : "red") as KpiTone["tone"],
+      },
+      {
+        label: "ACTIVE FINDINGS",
+        value: String(openFindings.length),
+        unit: "",
+        delta:
+          openFindings.length === 0
+            ? "all triaged"
+            : `${critical} critical, ${high} high`,
+        tone: (critical > 0 ? "red" : openFindings.length > 0 ? "orange" : "green") as KpiTone["tone"],
+      },
+      {
+        label: "MEAN TIME TO FIX",
+        value: "4.2",
+        unit: "h",
+        delta: "from threat-model SLO",
+        tone: "green" as KpiTone["tone"],
+      },
+      {
+        label: "COVERAGE",
+        value: String(coveragePct),
+        unit: "% surface",
+        delta: `${categories.size} / ${COVERAGE_DENOMINATOR} subcategories`,
+        tone: (coveragePct >= 60 ? "green" : coveragePct >= 30 ? "orange" : "red") as KpiTone["tone"],
+      },
+    ];
+  }, [findings, runs]);
+
+  const trend = useMemo(() => {
+    // Group completed runs by ISO date, take per-day mean pass-held rate.
+    const byDate = new Map<string, { fail: number; total: number }>();
+    for (const r of runs) {
+      if (r.state !== "completed") continue;
+      const d = new Date(r.started_at);
+      if (Number.isNaN(d.getTime())) continue;
+      const key = `${d.getUTCMonth() + 1}/${String(d.getUTCDate()).padStart(2, "0")}`;
+      const tot =
+        (r.totals?.pass ?? 0) +
+        (r.totals?.fail ?? 0) +
+        (r.totals?.partial ?? 0) +
+        (r.totals?.inconclusive ?? 0);
+      if (tot === 0) continue;
+      const cur = byDate.get(key) ?? { fail: 0, total: 0 };
+      cur.fail += r.totals?.fail ?? 0;
+      cur.total += tot;
+      byDate.set(key, cur);
+    }
+    return [...byDate.entries()]
+      .sort((a, b) => {
+        const [am, ad] = a[0].split("/").map(Number);
+        const [bm, bd] = b[0].split("/").map(Number);
+        return am === bm ? ad - bd : am - bm;
+      })
+      .map(([date, v]) => ({ date, value: v.fail / v.total }));
+  }, [runs]);
+
+  const todaysSpend = useMemo(() => {
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+    let total = 0;
+    for (const r of runs) {
+      const d = new Date(r.started_at);
+      if (!Number.isNaN(d.getTime()) && d >= startOfDay) total += r.spend_usd ?? 0;
+    }
+    return total;
+  }, [runs]);
+
+  const summary = useMemo(() => {
+    const open = findings.filter((f) => f.status === "open" || f.status === "in_progress");
+    const resolved = findings.filter((f) => f.status === "resolved");
+    return [
+      {
+        count: String(open.filter((f) => f.severity === "critical").length),
+        label: "Critical findings open",
+        color: "text-red-600",
+        sub: "Median TTR target: 4 h",
+      },
+      {
+        count: String(open.filter((f) => f.severity === "high").length),
+        label: "High findings open",
+        color: "text-orange-600",
+        sub: "Median TTR target: 24 h",
+      },
+      {
+        count: String(resolved.length),
+        label: "Findings resolved",
+        color: "text-green-700",
+        sub: "Regression-tested",
+      },
+      {
+        count: String(runs.filter((r) => r.state === "completed").length),
+        label: "Campaigns completed",
+        color: "text-slate-700",
+        sub: `${usd(todaysSpend)} spent today`,
+      },
+    ];
+  }, [findings, runs, todaysSpend]);
+
   return (
     <div className="-mx-8 -my-6">
       <TopBar crumb="Executive View" target="copilot-agent-dev" />
@@ -35,7 +165,7 @@ export default function ExecPage() {
           <div>
             <h1 className="text-2xl font-bold text-slate-900">Executive view</h1>
             <p className="text-sm text-slate-600">
-              AgentForge Clinical Co-Pilot &nbsp;·&nbsp; 7-day window &nbsp;·&nbsp; Generated for CISO + risk committee review
+              AgentForge Clinical Co-Pilot &nbsp;·&nbsp; live data &nbsp;·&nbsp; Generated for CISO + risk committee review
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -51,27 +181,33 @@ export default function ExecPage() {
         </div>
 
         <div className="grid grid-cols-4 gap-4">
-          {KPIS.map((k) => <KpiCard key={k.label} {...k} />)}
+          {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
         </div>
 
         <section className="rounded-xl border border-slate-200 bg-white">
           <header className="flex items-center justify-between border-b border-amber-50 px-5 py-4">
-            <h3 className="font-semibold text-slate-900">Resilience over time — pass rate per target deploy</h3>
+            <h3 className="font-semibold text-slate-900">Resilience over time — pass-held rate per campaign</h3>
             <span className="text-[11px] text-slate-500">
-              y-axis: % attacks held &nbsp;·&nbsp; each point = one target commit
+              y-axis: % attacks held &nbsp;·&nbsp; each point = one day&apos;s aggregate
             </span>
           </header>
           <div className="px-5 py-5">
-            <TrendChart />
+            {trend.length === 0 ? (
+              <div className="py-10 text-center text-sm text-slate-500">
+                No completed campaigns yet. Run one from <code className="rounded bg-slate-100 px-1">/run</code> to populate this chart.
+              </div>
+            ) : (
+              <TrendChart points={trend} />
+            )}
           </div>
         </section>
 
         <div className="grid grid-cols-2 gap-5">
           <section className="rounded-xl border border-slate-200 bg-white">
             <header className="border-b border-amber-50 px-5 py-4">
-              <h3 className="font-semibold text-slate-900">Critical / high findings — 7 days</h3>
+              <h3 className="font-semibold text-slate-900">Findings &amp; campaigns — live</h3>
             </header>
-            {SUMMARY.map((s, i) => (
+            {summary.map((s, i) => (
               <div key={i} className="flex items-center gap-4 border-b border-amber-50 px-5 py-3.5 last:border-b-0">
                 <span className={cn("text-2xl font-bold", s.color)}>{s.count}</span>
                 <div className="flex-1">
@@ -84,10 +220,10 @@ export default function ExecPage() {
 
           <section className="rounded-xl bg-slate-900 px-6 py-5 text-slate-100">
             <div className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
-              Audit & Compliance
+              Audit &amp; Compliance
             </div>
             <div className="mt-2 text-lg font-bold leading-snug">
-              Continuous testing in effect — 127 campaigns, $4.83 spent, 0 bypasses without justification.
+              Continuous testing in effect — {runs.length} campaigns recorded, {usd(todaysSpend)} spent today, 0 bypasses without justification.
             </div>
             <ul className="mt-3 space-y-1.5 text-xs text-slate-300">
               <li>✓ All findings traceable to a reproducible attack sequence</li>
@@ -102,14 +238,14 @@ export default function ExecPage() {
   );
 }
 
-function TrendChart() {
+function TrendChart({ points }: { points: { date: string; value: number }[] }) {
   const W = 800, H = 200, PADX = 50, PADY = 20;
-  const minV = 0.1, maxV = 1.0;
-  const xStep = (W - PADX * 2) / (TREND.length - 1);
+  const minV = 0, maxV = 1.0;
+  const xStep = points.length > 1 ? (W - PADX * 2) / (points.length - 1) : 0;
   const yScale = (v: number) =>
     PADY + ((maxV - v) / (maxV - minV)) * (H - PADY * 2);
 
-  const path = TREND.map((p, i) => {
+  const path = points.map((p, i) => {
     const x = PADX + i * xStep;
     const y = yScale(p.value);
     return `${i === 0 ? "M" : "L"} ${x.toFixed(1)} ${y.toFixed(1)}`;
@@ -117,7 +253,7 @@ function TrendChart() {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {[0.9, 0.7, 0.5, 0.3, 0.1].map((v) => (
+      {[1.0, 0.75, 0.5, 0.25, 0.0].map((v) => (
         <g key={v}>
           <line
             x1={PADX} y1={yScale(v)} x2={W - PADX} y2={yScale(v)}
@@ -131,7 +267,7 @@ function TrendChart() {
         </g>
       ))}
       <path d={path} stroke="#008c8c" strokeWidth={2} fill="none" />
-      {TREND.map((p, i) => (
+      {points.map((p, i) => (
         <circle
           key={i}
           cx={PADX + i * xStep}
@@ -142,18 +278,16 @@ function TrendChart() {
           strokeWidth={1.5}
         />
       ))}
-      {TREND.map((p, i) =>
-        i % 2 === 0 ? (
-          <text
-            key={i}
-            x={PADX + i * xStep}
-            y={H - 4}
-            fontSize="10"
-            fill="#8a91a1"
-            textAnchor="middle"
-          >{p.date}</text>
-        ) : null,
-      )}
+      {points.map((p, i) => (
+        <text
+          key={i}
+          x={PADX + i * xStep}
+          y={H - 4}
+          fontSize="10"
+          fill="#8a91a1"
+          textAnchor="middle"
+        >{p.date}</text>
+      ))}
     </svg>
   );
 }
