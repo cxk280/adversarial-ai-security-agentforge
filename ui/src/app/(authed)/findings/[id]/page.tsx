@@ -119,31 +119,6 @@ export default function FindingDetailPage({ params }: PageProps) {
             </Card>
 
             <StatusActionsCard id={id} currentStatus={finding.status} />
-
-            {finding.status_history && (
-              <Card title="Status history">
-                <dl className="space-y-2 text-xs">
-                  <Meta
-                    label="Changed"
-                    value={relativeTime(finding.status_history.changed_at)}
-                  />
-                  {finding.status_history.changed_by && (
-                    <Meta label="By" value={finding.status_history.changed_by} />
-                  )}
-                  {finding.status_history.commit_sha && (
-                    <Meta label="Commit" value={finding.status_history.commit_sha} />
-                  )}
-                  {finding.status_history.rationale && (
-                    <div className="text-slate-700">
-                      <div className="mb-1 text-slate-500">Rationale</div>
-                      <div className="rounded bg-amber-50/40 px-2.5 py-2 text-[12px] leading-5">
-                        {finding.status_history.rationale}
-                      </div>
-                    </div>
-                  )}
-                </dl>
-              </Card>
-            )}
           </div>
         </div>
       </div>
