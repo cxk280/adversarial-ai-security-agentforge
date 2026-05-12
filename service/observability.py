@@ -120,6 +120,21 @@ def trace_attack(run_trace, *, attack_id: str, category: str, subcategory: str, 
         yield None
 
 
+def current_trace_url() -> str | None:
+    """Return the Langfuse-hosted URL for the currently active trace,
+    or None when Langfuse is disabled / no trace is active. Must be
+    called from inside an active `trace_run(...)` context so the OTEL
+    context has a trace bound."""
+    client = _client_or_none()
+    if client is None:
+        return None
+    try:
+        url = client.get_trace_url()
+    except Exception:
+        return None
+    return url or None
+
+
 def log_judge_verdict(span, *, model: str, verdict: str, rationale: str, usd_cost: float) -> None:
     """Attach a Judge verdict as a generation observation under the
     currently active OTEL context (the attack span)."""

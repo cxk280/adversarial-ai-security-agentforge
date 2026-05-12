@@ -36,6 +36,9 @@ export interface RunSummary {
     cost_per_cycle_change_pct: number;
   };
   gate?: { verdict: "pass" | "fail" | "error"; reasons: string[] } | null;
+  /** Cross-platform jump links. `langfuse` points at the trace tree
+   *  for this run when Langfuse was configured; absent otherwise. */
+  links?: { dashboard?: string; findings?: string; langfuse?: string };
 }
 
 export interface ListRunsResponse {

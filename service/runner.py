@@ -32,7 +32,12 @@ from harness import CoPilotExecutor, new_session_id, run_assertions
 from harness.allowlist import TargetNotAllowedError
 from service import db
 from service.models import now_iso
-from service.observability import log_judge_verdict, trace_attack, trace_run
+from service.observability import (
+    current_trace_url,
+    log_judge_verdict,
+    trace_attack,
+    trace_run,
+)
 
 
 SEEDS_ROOT = "evals/seeds"
@@ -220,6 +225,12 @@ async def execute_run(
         return bool(row and row.get("state") == "cancelled")
 
     with trace_run(run_id, target_url, suite_ref) as run_tr:
+        # Capture the Langfuse trace URL right after the trace starts
+        # so the run-detail UI can deep-link to it even if the run
+        # crashes mid-flight.
+        trace_url = current_trace_url()
+        if trace_url:
+            db.update_run(run_id, {"langfuse_trace_url": trace_url})
         for atk in seeds:
             if _is_cancelled():
                 cancelled = True

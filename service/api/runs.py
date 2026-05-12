@@ -98,6 +98,13 @@ async def get_run_status(
         attempts = db.list_attempts(run_id)
         progress = {"completed": len(attempts)}
 
+    links: dict[str, str] = {
+        "dashboard": f"/runs/{run_id}",
+        "findings": f"/runs/{run_id}/findings",
+    }
+    if row.get("langfuse_trace_url"):
+        links["langfuse"] = row["langfuse_trace_url"]
+
     return RunStatus(
         run_id=run_id,
         state=row["state"],
@@ -112,10 +119,7 @@ async def get_run_status(
         deltas=deltas,
         gate=gate,
         progress=progress,
-        links={
-            "dashboard": f"/runs/{run_id}",
-            "findings": f"/runs/{run_id}/findings",
-        },
+        links=links,
     )
 
 

@@ -7,6 +7,8 @@ import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
 import { useAttempts, useRun } from "@/hooks/use-runs";
 
+// Fallback host — used only when the API didn't return a deep link
+// (older runs from before the per-run trace URL was captured).
 const LANGFUSE_HOST = "https://langfuse-web-production-368f.up.railway.app";
 
 interface PageProps {
@@ -108,14 +110,20 @@ export default function RunDetailPage({ params }: PageProps) {
         {/* Cross-platform jump links */}
         <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-amber-50/30 px-4 py-3 text-xs">
           <span className="font-semibold text-slate-700">Trace tree:</span>
-          <Link
-            href={`${LANGFUSE_HOST}/`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-teal-600 hover:underline"
-          >
-            Open in Langfuse →
-          </Link>
+          {run?.links?.langfuse ? (
+            <Link
+              href={run.links.langfuse}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-teal-600 hover:underline"
+            >
+              Open in Langfuse →
+            </Link>
+          ) : (
+            <span className="text-slate-400" title="Run predates per-run trace capture, or Langfuse was disabled">
+              not captured
+            </span>
+          )}
           <span className="text-slate-400">·</span>
           <span className="font-semibold text-slate-700">Audit:</span>
           <span className="text-slate-500">
@@ -185,7 +193,7 @@ export default function RunDetailPage({ params }: PageProps) {
                 <p className="mt-2 text-[11px] text-slate-500">
                   Per-judge verdicts + rationales are recorded as Langfuse spans on this attempt.{" "}
                   <Link
-                    href={LANGFUSE_HOST}
+                    href={run?.links?.langfuse ?? LANGFUSE_HOST}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-teal-600 hover:underline"

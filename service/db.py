@@ -57,7 +57,8 @@ CREATE TABLE IF NOT EXISTS regression_runs (
     spend_usd           REAL NOT NULL DEFAULT 0,
     totals_json         TEXT NOT NULL DEFAULT '{}',
     deltas_json         TEXT NOT NULL DEFAULT '{}',
-    gate_json           TEXT NOT NULL DEFAULT '{}'
+    gate_json           TEXT NOT NULL DEFAULT '{}',
+    langfuse_trace_url  TEXT
 );
 
 CREATE TABLE IF NOT EXISTS attempts (
@@ -108,6 +109,16 @@ def init_db() -> None:
     """Idempotent — safe to run on every boot."""
     with get_conn() as conn:
         conn.executescript(_SCHEMA)
+        # Tolerant ALTERs for columns added after the initial schema.
+        # The persistent Railway volume keeps the old shape across
+        # redeploys, so we need to retro-add new columns.
+        for ddl in (
+            "ALTER TABLE regression_runs ADD COLUMN langfuse_trace_url TEXT",
+        ):
+            try:
+                conn.execute(ddl)
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
 
 # ─── Run helpers ─────────────────────────────────────────────────────
