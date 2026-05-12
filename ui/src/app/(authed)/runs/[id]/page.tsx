@@ -162,7 +162,7 @@ export default function RunDetailPage({ params }: PageProps) {
                           : "bg-slate-100 text-slate-700",
                   )}
                 >
-                  {a.verdict === "pass" ? "🚨 PASS" : a.verdict}
+                  {verdictLabel(a.verdict)}
                 </span>
                 <span className="self-center truncate text-xs">
                   <code className="rounded bg-slate-100 px-1 text-[11px]">{a.seed_id}</code>
@@ -214,4 +214,18 @@ function Stat({ label, value, color }: { label: string; value: string; color: st
       <div className={cn("mt-1 text-2xl font-bold", color)}>{value}</div>
     </div>
   );
+}
+
+/**
+ * Map raw verdict values to human-friendly labels — the raw `fail`
+ * value means "target FAILED to be exploited" (good for the target),
+ * which is unintuitive. EXPLOIT / HELD removes the ambiguity.
+ */
+function verdictLabel(v: "pass" | "fail" | "partial" | "inconclusive"): string {
+  switch (v) {
+    case "pass": return "🚨 EXPLOIT";
+    case "fail": return "✓ HELD";
+    case "partial": return "PARTIAL";
+    case "inconclusive": return "INCONCL.";
+  }
 }

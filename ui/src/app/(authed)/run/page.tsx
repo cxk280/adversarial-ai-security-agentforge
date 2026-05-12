@@ -6,6 +6,7 @@ import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { submitRun, type Attempt } from "@/lib/api";
 import { useAttempts, useRun } from "@/hooks/use-runs";
+import { useActiveRunId } from "@/lib/use-active-run-id";
 import { usd } from "@/lib/format";
 
 const TARGETS = [
@@ -41,7 +42,9 @@ export default function RunPage() {
     new Set(["indirect", "cross_patient", "direct", "persona_hijack"]),
   );
   const [mode, setMode] = useState("tap");
-  const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  // activeRunId persists across navigations via sessionStorage so the
+  // verdict stream resumes when the user comes back to /run.
+  const [activeRunId, setActiveRunId] = useActiveRunId();
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
 
@@ -91,6 +94,30 @@ export default function RunPage() {
 
   const attempts = useMemo(() => {
     return [...(attemptsData?.attempts ?? [])].reverse();
+  }, [attemptsData]);
+
+  // Derive live totals from the streaming attempts feed. The backend
+  // writes totals_json to the runs table only at completion, so
+  // runData.totals stays {0,0,0,0} for the entire active window of
+  // a run. We tally verdicts client-side so the four pills update
+  // attack-by-attack instead of jumping from 0 → final at the end.
+  const liveTotals = useMemo(() => {
+    const t = { pass: 0, fail: 0, partial: 0, inconclusive: 0 };
+    for (const a of attemptsData?.attempts ?? []) {
+      if (a.verdict === "pass") t.pass++;
+      else if (a.verdict === "fail") t.fail++;
+      else if (a.verdict === "partial") t.partial++;
+      else if (a.verdict === "inconclusive") t.inconclusive++;
+    }
+    return t;
+  }, [attemptsData]);
+
+  // Derive live spend the same way — sum per-attempt cost as they
+  // land, instead of waiting on the final spend_usd update.
+  const liveSpend = useMemo(() => {
+    let sum = 0;
+    for (const a of attemptsData?.attempts ?? []) sum += a.spend_usd ?? 0;
+    return sum;
   }, [attemptsData]);
 
   return (
@@ -264,7 +291,7 @@ export default function RunPage() {
               <div className="mt-3 space-y-1 text-xs text-slate-300">
                 <div>Predicted exploit yield (vs. 7-day baseline): {Math.round(estCycles * 0.05)}–{Math.round(estCycles * 0.08)} PASSes</div>
                 <div>Judges: claude-haiku-4-5 + gpt-4.1-mini, arbitrator claude-sonnet-4-6</div>
-                <div>Mutator: huihui-ai 70B abl. (RunPod) → DeepSeek-R1 on escalation</div>
+                <div>Mutator: huihui-ai 3B abl.-finetuned (RunPod 24GB) → DeepSeek-R1 on escalation</div>
               </div>
             </div>
 
@@ -283,8 +310,8 @@ export default function RunPage() {
                 activeRunId={activeRunId}
                 attempts={attempts}
                 runState={runData?.state}
-                totals={runData?.totals}
-                spendUsd={runData?.spend_usd}
+                totals={liveTotals}
+                spendUsd={runData?.spend_usd ?? liveSpend}
               />
             </section>
           </aside>
@@ -400,7 +427,7 @@ function LiveStream({
                       : "bg-slate-100 text-slate-700",
               )}
             >
-              {a.verdict === "pass" ? "🚨 PASS" : a.verdict}
+              {verdictLabel(a.verdict)}
             </span>
             <span className="truncate text-[11px] text-slate-700">
               <code className="text-slate-500">{a.seed_id}</code>
@@ -412,6 +439,22 @@ function LiveStream({
       </div>
     </div>
   );
+}
+
+/**
+ * Map raw verdict values to human-friendly labels. Naming matters
+ * here — `fail` literally means "the target FAILED to be exploited"
+ * (i.e. it held the attack), which reads as a *good* outcome for the
+ * target but a bad one for the attacker. Using HELD / EXPLOIT in the
+ * UI removes that confusion.
+ */
+function verdictLabel(v: "pass" | "fail" | "partial" | "inconclusive"): string {
+  switch (v) {
+    case "pass": return "🚨 EXPLOIT";
+    case "fail": return "✓ HELD";
+    case "partial": return "PARTIAL";
+    case "inconclusive": return "INCONCL.";
+  }
 }
 
 function Pill({ label, value, color }: { label: string; value: number; color: string }) {
