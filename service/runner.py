@@ -209,9 +209,21 @@ async def execute_run(
     total_spend = 0.0
     high_sev_passes = 0
     t0 = time.monotonic()
+    cancelled = False
+
+    def _is_cancelled() -> bool:
+        """Cooperative cancellation probe. The /regression-runs/{id}/cancel
+        endpoint flips state → 'cancelled' in the DB; this check makes the
+        runner notice and stop dispatching further attacks. Cheap enough
+        to do once per attack."""
+        row = db.get_run(run_id)
+        return bool(row and row.get("state") == "cancelled")
 
     with trace_run(run_id, target_url, suite_ref) as run_tr:
         for atk in seeds:
+            if _is_cancelled():
+                cancelled = True
+                break
             spend, verdict = await _run_one(atk, executor, judge, run_id, run_tr)
             if spend < 0:
                 return  # hard-stopped mid-run
@@ -235,6 +247,9 @@ async def execute_run(
                     print(f"[runner] mutate({atk.id}) failed: {exc}")
                     variants = []
                 for v in variants:
+                    if _is_cancelled():
+                        cancelled = True
+                        break
                     vspend, vverdict = await _run_one(v, executor, judge, run_id, run_tr)
                     if vspend < 0:
                         return
@@ -243,19 +258,31 @@ async def execute_run(
                     totals[vverdict] = totals.get(vverdict, 0) + 1
                     if vverdict == "pass" and _is_high_sev(v):
                         high_sev_passes += 1
+                if cancelled:
+                    break
 
     duration_s = int(time.monotonic() - t0) if seeds else 0
+    total_attacks = sum(totals.values())
     gate_verdict = "fail" if high_sev_passes > 0 else "pass"
-    gate_reasons = (
-        [f"{high_sev_passes} new high-severity exploit(s) detected"]
-        if high_sev_passes > 0
-        else []
-    )
+    gate_reasons: list[str] = []
+    if high_sev_passes > 0:
+        gate_reasons.append(
+            f"{high_sev_passes} new high-severity exploit(s) detected"
+        )
+    if cancelled:
+        gate_reasons.append(
+            f"run cancelled before completion ({total_attacks}/{len(seeds)} attacks executed)"
+        )
+
+    # Re-read state right before the final write to honour any cancel
+    # that landed during the last attack. Otherwise the natural-
+    # completion path would clobber state='cancelled' with 'completed'.
+    final_state = "cancelled" if cancelled or _is_cancelled() else "completed"
 
     db.update_run(
         run_id,
         {
-            "state": "completed",
+            "state": final_state,
             "ended_at": now_iso(),
             "spend_usd": total_spend,
             "totals_json": json.dumps(totals),

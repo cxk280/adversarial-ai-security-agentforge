@@ -5,7 +5,7 @@ import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { submitRun, type Attempt } from "@/lib/api";
-import { useAttempts, useRun } from "@/hooks/use-runs";
+import { useAttempts, useRun, useCancelRun } from "@/hooks/use-runs";
 import { useActiveRunId } from "@/lib/use-active-run-id";
 import { usd } from "@/lib/format";
 
@@ -70,6 +70,7 @@ export default function RunPage() {
 
   const { data: runData } = useRun(activeRunId ?? undefined);
   const { data: attemptsData } = useAttempts(activeRunId ?? undefined);
+  const cancelMutation = useCancelRun();
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -112,6 +113,12 @@ export default function RunPage() {
     runData?.state === "running" || runData?.state === "queued";
   const isDone =
     runData?.state === "completed" || runData?.state === "failed" || runData?.state === "cancelled";
+  const isCancelled = runData?.state === "cancelled";
+
+  const stopRun = () => {
+    if (!activeRunId || !isRunning) return;
+    cancelMutation.mutate(activeRunId);
+  };
 
   const attempts = useMemo(() => {
     return [...(attemptsData?.attempts ?? [])].reverse();
@@ -288,6 +295,17 @@ export default function RunPage() {
               >
                 Reset
               </button>
+              {isRunning && (
+                <button
+                  type="button"
+                  onClick={stopRun}
+                  disabled={cancelMutation.isPending}
+                  className="flex items-center gap-2 rounded-lg border border-red-200 bg-white px-4 py-2 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
+                >
+                  <span>■</span>
+                  {cancelMutation.isPending ? "Stopping…" : "Stop run"}
+                </button>
+              )}
               <button
                 type="button"
                 onClick={launch}
@@ -298,6 +316,13 @@ export default function RunPage() {
                 {launching ? "Launching…" : isRunning ? "Running…" : "Launch campaign"}
               </button>
             </div>
+            {cancelMutation.isError && (
+              <div className="rounded-lg border border-red-200 bg-red-50/60 px-3 py-2 text-xs text-red-700">
+                {cancelMutation.error instanceof Error
+                  ? cancelMutation.error.message
+                  : "Cancel failed"}
+              </div>
+            )}
           </section>
 
           {/* Preview / Live Stream */}
@@ -323,7 +348,8 @@ export default function RunPage() {
                   state={
                     !activeRunId ? "idle"
                       : isRunning ? "running"
-                        : isDone ? "done" : "idle"
+                        : isCancelled ? "cancelled"
+                          : isDone ? "done" : "idle"
                   }
                 />
               </header>
@@ -342,7 +368,7 @@ export default function RunPage() {
   );
 }
 
-function StatusDot({ state }: { state: "idle" | "running" | "done" }) {
+function StatusDot({ state }: { state: "idle" | "running" | "done" | "cancelled" }) {
   if (state === "running") {
     return (
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-teal-700">
@@ -359,6 +385,14 @@ function StatusDot({ state }: { state: "idle" | "running" | "done" }) {
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-green-700">
         <span className="h-2 w-2 rounded-full bg-green-500" />
         Complete
+      </div>
+    );
+  }
+  if (state === "cancelled") {
+    return (
+      <div className="flex items-center gap-1.5 text-[11px] font-semibold text-orange-700">
+        <span className="h-2 w-2 rounded-full bg-orange-500" />
+        Cancelled — partial results
       </div>
     );
   }

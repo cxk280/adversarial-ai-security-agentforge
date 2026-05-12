@@ -10,6 +10,7 @@ import {
   listAttempts,
   getCoverage,
   updateFindingStatus,
+  cancelRun,
   type RunSummary,
   type FindingSummary,
 } from "@/lib/api";
@@ -75,6 +76,21 @@ export function useCoverage() {
     queryKey: ["coverage"],
     queryFn: () => getCoverage(),
     refetchInterval: 30_000,
+  });
+}
+
+/** Mutation hook for POST /regression-runs/{id}/cancel. Invalidates
+ *  the affected run + attempts queries so the UI flips to a
+ *  cancelled state immediately. */
+export function useCancelRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: string) => cancelRun(runId),
+    onSuccess: (_, runId) => {
+      qc.invalidateQueries({ queryKey: ["run", runId] });
+      qc.invalidateQueries({ queryKey: ["attempts", runId] });
+      qc.invalidateQueries({ queryKey: ["runs"] });
+    },
   });
 }
 
