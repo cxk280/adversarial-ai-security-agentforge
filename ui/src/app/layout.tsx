@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import { Sidebar } from "@/components/sidebar";
+import { QueryProvider } from "@/components/query-provider";
 
 export const metadata: Metadata = {
   title: "AgentForge Adversarial AI Security",
@@ -15,10 +16,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className="antialiased bg-slate-50 text-slate-900">
-        <div className="flex min-h-screen">
-          <Sidebar />
-          <main className="flex-1 px-8 py-6 overflow-x-auto">{children}</main>
-        </div>
+        <QueryProvider>
+          <div className="flex min-h-screen">
+            <Sidebar />
+            <main className="flex-1 px-8 py-6 overflow-x-auto">{children}</main>
+          </div>
+        </QueryProvider>
       </body>
     </html>
   );

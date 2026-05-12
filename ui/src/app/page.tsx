@@ -1,7 +1,8 @@
 import { TopBar } from "@/components/top-bar";
 import { KpiCard } from "@/components/kpi-card";
 import { FindingRow } from "@/components/finding-row";
-import { FINDINGS, RECENT_RUNS, COVERAGE } from "@/lib/mock";
+import { RecentRunsCard } from "@/components/recent-runs-card";
+import { FINDINGS, COVERAGE } from "@/lib/mock";
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -46,58 +47,7 @@ export default function DashboardPage() {
             </div>
           </section>
 
-          <section className="rounded-xl border border-slate-200 bg-white">
-            <header className="flex items-center justify-between px-5 py-4">
-              <h3 className="font-semibold text-slate-900">Recent Runs</h3>
-              <a href="/runs" className="text-xs font-medium text-teal-600 hover:underline">
-                View all →
-              </a>
-            </header>
-            <div className="border-t border-amber-50">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b border-amber-50">
-                    {["RUN", "WHEN", "ATTACKS", "EXPLOITS", "COST"].map((h) => (
-                      <th
-                        key={h}
-                        className="px-5 py-2.5 text-left text-[10px] font-bold uppercase tracking-wide text-slate-500"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {RECENT_RUNS.map((r) => (
-                    <tr key={r.campaignId} className="border-b border-amber-50 last:border-b-0">
-                      <td className="px-5 py-3 text-xs font-medium text-slate-900">
-                        cmp_…{r.campaignId.slice(-6)}
-                      </td>
-                      <td className="px-5 py-3 text-xs text-slate-600">
-                        {relativeTime(r.startedAt)}
-                      </td>
-                      <td className="px-5 py-3 text-xs text-slate-900">{r.totalAttacks}</td>
-                      <td
-                        className={
-                          "px-5 py-3 text-xs font-semibold " +
-                          (r.pass >= 5
-                            ? "text-red-600"
-                            : r.pass > 0
-                              ? "text-orange-600"
-                              : "text-slate-500")
-                        }
-                      >
-                        {r.pass > 0 ? `🚨 ${r.pass}` : "0"}
-                      </td>
-                      <td className="px-5 py-3 text-xs text-slate-900">
-                        ${r.spendUsd.toFixed(2)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </section>
+          <RecentRunsCard limit={5} />
         </div>
 
         <section className="rounded-xl border border-slate-200 bg-white">

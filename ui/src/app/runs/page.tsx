@@ -1,37 +1,10 @@
+"use client";
+
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
-
-interface RunRow {
-  id: string;
-  startedAt: string;
-  source: "manual" | "circleci" | "scheduled";
-  target: string;
-  attacks: number;
-  exploits: number;
-  duration: string;
-  cost: number | null;
-  state: "DONE" | "BYPASS";
-}
-
-const RUNS: RunRow[] = [
-  { id: "cmp_…864228", startedAt: "2026-05-11T17:14:00Z", source: "manual",    target: "dev",  attacks: 57, exploits: 3, duration: "7m 34s", cost: 0.18, state: "DONE" },
-  { id: "cmp_…b31426", startedAt: "2026-05-11T17:06:00Z", source: "manual",    target: "dev",  attacks: 57, exploits: 2, duration: "7m 47s", cost: 0.18, state: "DONE" },
-  { id: "cmp_…7c22d2", startedAt: "2026-05-11T16:58:00Z", source: "manual",    target: "dev",  attacks: 57, exploits: 8, duration: "8m 02s", cost: 0.19, state: "DONE" },
-  { id: "cmp_…2a789a", startedAt: "2026-05-11T16:55:00Z", source: "manual",    target: "dev",  attacks: 5,  exploits: 1, duration: "1m 12s", cost: 0.02, state: "DONE" },
-  { id: "cmp_…3e85ab", startedAt: "2026-05-11T16:30:00Z", source: "circleci",  target: "dev",  attacks: 30, exploits: 0, duration: "3m 41s", cost: 0.09, state: "DONE" },
-  { id: "cmp_…f14d22", startedAt: "2026-05-11T12:30:00Z", source: "scheduled", target: "qa",   attacks: 30, exploits: 0, duration: "3m 28s", cost: 0.10, state: "DONE" },
-  { id: "cmp_…aa19c0", startedAt: "2026-05-11T09:30:00Z", source: "circleci",  target: "dev",  attacks: 30, exploits: 0, duration: "3m 33s", cost: 0.10, state: "DONE" },
-  { id: "cmp_…71e2d8", startedAt: "2026-05-11T03:30:00Z", source: "manual",    target: "dev",  attacks: 12, exploits: 0, duration: "1m 02s", cost: null, state: "BYPASS" },
-  { id: "cmp_…550b9a", startedAt: "2026-05-10T17:00:00Z", source: "scheduled", target: "prod", attacks: 30, exploits: 0, duration: "4m 11s", cost: 0.11, state: "DONE" },
-  { id: "cmp_…20cb14", startedAt: "2026-05-09T14:30:00Z", source: "circleci",  target: "dev",  attacks: 30, exploits: 1, duration: "3m 49s", cost: 0.10, state: "DONE" },
-];
-
-const SOURCE_COLOR: Record<RunRow["source"], string> = {
-  manual:    "text-teal-600",
-  circleci:  "text-slate-900",
-  scheduled: "text-slate-500",
-};
+import { useRuns } from "@/hooks/use-runs";
+import type { RunSummary } from "@/lib/api";
 
 const FILTERS = [
   { label: "Source", value: "All" },
@@ -41,9 +14,12 @@ const FILTERS = [
 ];
 
 export default function RunsHistoryPage() {
-  const total = RUNS.length;
-  const exploits = RUNS.reduce((s, r) => s + r.exploits, 0);
-  const totalCost = RUNS.reduce((s, r) => s + (r.cost ?? 0), 0);
+  const { data, isLoading, error } = useRuns();
+  const runs: RunSummary[] = data?.runs ?? [];
+
+  const total = runs.length;
+  const exploits = runs.reduce((s, r) => s + (r.totals?.pass ?? 0), 0);
+  const totalCost = runs.reduce((s, r) => s + (r.spend_usd ?? 0), 0);
 
   return (
     <div className="-mx-8 -my-6">
@@ -53,7 +29,15 @@ export default function RunsHistoryPage() {
           <div className="space-y-1">
             <h1 className="text-2xl font-bold text-slate-900">Run history</h1>
             <p className="text-sm text-slate-600">
-              Last 7 days &nbsp;·&nbsp; {total} campaigns &nbsp;·&nbsp; {usd(totalCost)} total spend &nbsp;·&nbsp; {exploits} confirmed exploits &nbsp;·&nbsp; All replays available
+              {isLoading ? (
+                "Loading…"
+              ) : error ? (
+                <span className="text-red-600">API error · check ADVERSARY_API_TOKEN env</span>
+              ) : (
+                <>
+                  Last 7 days &nbsp;·&nbsp; {total} campaigns &nbsp;·&nbsp; {usd(totalCost)} total spend &nbsp;·&nbsp; {exploits} confirmed exploits &nbsp;·&nbsp; All replays available
+                </>
+              )}
             </p>
           </div>
           <button
@@ -90,43 +74,83 @@ export default function RunsHistoryPage() {
         </div>
 
         <section className="rounded-xl border border-slate-200 bg-white">
-          <div className="grid grid-cols-[1.2fr_90px_90px_70px_70px_70px_70px_70px_80px] gap-3 border-b border-amber-50 px-5 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+          <div className="grid grid-cols-[1.5fr_90px_90px_140px_70px_70px_70px_80px] gap-3 border-b border-amber-50 px-5 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
             <div>Campaign</div>
             <div>Started</div>
-            <div>Source</div>
+            <div>Duration</div>
             <div>Target</div>
             <div>Attacks</div>
             <div>Exploits</div>
-            <div>Duration</div>
             <div>Cost</div>
             <div>State</div>
           </div>
-          {RUNS.map((r) => (
-            <div
-              key={r.id}
-              className="grid grid-cols-[1.2fr_90px_90px_70px_70px_70px_70px_70px_80px] gap-3 border-b border-amber-50 px-5 py-3 last:border-b-0 items-center"
-            >
-              <div className="text-xs font-semibold text-teal-600">{r.id}</div>
-              <div className="text-xs text-slate-500">{relativeTime(r.startedAt)}</div>
-              <div className={cn("text-xs font-medium", SOURCE_COLOR[r.source])}>{r.source}</div>
-              <div className="text-xs font-medium text-slate-900">{r.target}</div>
-              <div className="text-xs text-slate-900">{r.attacks}</div>
-              <div className={cn(
-                "text-xs",
-                r.exploits === 0 ? "text-slate-400" : "font-bold text-red-600",
-              )}>{r.exploits === 0 ? "0" : `🚨 ${r.exploits}`}</div>
-              <div className="text-xs text-slate-500">{r.duration}</div>
-              <div className="text-xs text-slate-900">{r.cost === null ? "—" : usd(r.cost)}</div>
-              <div>
-                <span className={cn(
-                  "rounded px-1.5 py-1 text-[9px] font-bold uppercase tracking-wide",
-                  r.state === "DONE"
-                    ? "bg-green-100 text-green-700"
-                    : "bg-orange-100 text-orange-700",
-                )}>{r.state}</span>
-              </div>
+          {isLoading && (
+            <div className="px-5 py-10 text-center text-sm text-slate-500">Loading runs…</div>
+          )}
+          {error && (
+            <div className="px-5 py-10 text-center text-sm text-red-600">
+              Couldn&apos;t reach the adversary-agent API. Check that
+              <code className="mx-1 rounded bg-slate-100 px-1 text-xs">NEXT_PUBLIC_ADVERSARY_API_TOKEN</code>
+              is set and the service is reachable.
             </div>
-          ))}
+          )}
+          {!isLoading && !error && runs.length === 0 && (
+            <div className="px-5 py-10 text-center text-sm text-slate-500">
+              No runs yet. Kick one off from the Ad Hoc Run page.
+            </div>
+          )}
+          {runs.map((r) => {
+            const attacks =
+              (r.totals?.pass ?? 0) +
+              (r.totals?.fail ?? 0) +
+              (r.totals?.partial ?? 0) +
+              (r.totals?.inconclusive ?? 0);
+            const shortTarget = r.target_url
+              .replace(/^https?:\/\//, "")
+              .replace(/\.up\.railway\.app$/, "")
+              .replace(/^copilot-agent-/, "");
+            return (
+              <div
+                key={r.run_id}
+                className="grid grid-cols-[1.5fr_90px_90px_140px_70px_70px_70px_80px] gap-3 border-b border-amber-50 px-5 py-3 last:border-b-0 items-center"
+              >
+                <div className="font-mono text-xs font-semibold text-teal-600">{r.run_id}</div>
+                <div className="text-xs text-slate-500">{relativeTime(r.started_at)}</div>
+                <div className="text-xs text-slate-500">
+                  {r.duration_s != null ? `${r.duration_s}s` : "—"}
+                </div>
+                <div className="text-xs font-medium text-slate-900">{shortTarget}</div>
+                <div className="text-xs text-slate-900">{attacks}</div>
+                <div
+                  className={cn(
+                    "text-xs",
+                    (r.totals?.pass ?? 0) === 0
+                      ? "text-slate-400"
+                      : "font-bold text-red-600",
+                  )}
+                >
+                  {(r.totals?.pass ?? 0) === 0 ? "0" : `🚨 ${r.totals.pass}`}
+                </div>
+                <div className="text-xs text-slate-900">{usd(r.spend_usd ?? 0)}</div>
+                <div>
+                  <span
+                    className={cn(
+                      "rounded px-1.5 py-1 text-[9px] font-bold uppercase tracking-wide",
+                      r.state === "completed"
+                        ? "bg-green-100 text-green-700"
+                        : r.state === "running"
+                          ? "bg-teal-50 text-teal-700"
+                          : r.state === "queued"
+                            ? "bg-slate-100 text-slate-700"
+                            : "bg-orange-100 text-orange-700",
+                    )}
+                  >
+                    {r.state}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
         </section>
       </div>
     </div>
