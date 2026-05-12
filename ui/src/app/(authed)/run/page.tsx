@@ -44,23 +44,24 @@ const CATEGORIES = [
   { id: "denial_of_service_infinite_loops",        name: "DoS — infinite loops",                    seeds: 3,  sev: 4,  priority: null },
 ];
 
+// Only seeds-only is wired live today; the other two require the
+// RunPod mutator (huihui-ai 3B abl.) which is unavailable as of
+// 2026-05-12. Labeled as such so the picker isn't lying about what
+// will actually run.
 const MODES = [
-  { id: "seeds",            name: "Seeds only",                 desc: "57 deterministic cases, ~5 min" },
-  { id: "tap",              name: "Seeds + mutation (TAP)",     desc: "Seeds + ~10 mutations each, ~15 min" },
-  { id: "crescendo",        name: "Crescendo multi-turn",       desc: "8 escalating turns × 5 chains, ~20 min" },
+  { id: "seeds",     name: "Seeds only",            desc: "Deterministic seed corpus, no mutator", available: true  },
+  { id: "tap",       name: "Seeds + mutation (TAP)", desc: "Requires RunPod mutator (unavailable)", available: false },
+  { id: "crescendo", name: "Crescendo multi-turn",   desc: "Requires RunPod mutator (unavailable)", available: false },
 ];
+
+const SUITE_LIMIT = 60; // matches promotion-gate-v1.limit in service/runner.py
 
 export default function RunPage() {
   const [target, setTarget] = useState("dev");
-  const [selected, setSelected] = useState<Set<string>>(
-    new Set([
-      "data_exfil_authorization_bypass",
-      "data_exfil_cross_patient",
-      "prompt_injection_indirect",
-      "identity_role_persona_hijack",
-    ]),
-  );
-  const [mode, setMode] = useState("tap");
+  // Start with NO categories pre-selected so the user explicitly
+  // picks their attack surface for this run.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [mode, setMode] = useState("seeds");
   // Reset the default selection to the 4 top-priority categories from
   // the new 17-category lineup.
   // Note: keeping useState's initializer in sync with CATEGORIES order.
@@ -85,7 +86,12 @@ export default function RunPage() {
     (sum, c) => sum + c.seeds,
     0,
   );
-  const estCycles = mode === "tap" ? totalSeeds * 3 : mode === "crescendo" ? 40 : totalSeeds;
+  // The backend caps any single campaign at SUITE_LIMIT (60) attempts
+  // regardless of how many seeds the selection holds. Reflect that in
+  // the preview so the user isn't told to expect more attacks than
+  // will actually dispatch.
+  const estCycles = Math.min(totalSeeds, SUITE_LIMIT);
+  const capped = totalSeeds > SUITE_LIMIT;
   const estUsd = (estCycles * 0.014).toFixed(2);
   const estMin = Math.max(2, Math.round(estCycles * 0.08));
 
@@ -255,10 +261,12 @@ export default function RunPage() {
                   <button
                     key={m.id}
                     type="button"
-                    onClick={() => setMode(m.id)}
+                    onClick={() => m.available && setMode(m.id)}
+                    disabled={!m.available}
                     className={cn(
                       "border-r border-slate-200 px-3.5 py-3 text-left last:border-r-0",
                       mode === m.id ? "bg-teal-50/60" : "bg-white hover:bg-slate-50",
+                      !m.available && "cursor-not-allowed opacity-60 hover:bg-white",
                     )}
                   >
                     <div className={cn(
@@ -309,8 +317,9 @@ export default function RunPage() {
               <button
                 type="button"
                 onClick={launch}
-                disabled={launching || isRunning}
-                className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:opacity-60"
+                disabled={launching || isRunning || selected.size === 0}
+                title={selected.size === 0 ? "Select at least one attack category" : undefined}
+                className="flex items-center gap-2 rounded-lg bg-teal-600 px-5 py-2 text-sm font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span>▶</span>
                 {launching ? "Launching…" : isRunning ? "Running…" : "Launch campaign"}
@@ -334,6 +343,11 @@ export default function RunPage() {
               <div className="mt-2 text-xl font-bold">
                 ≈ {estCycles} attacks &nbsp;·&nbsp; ≈ {estMin} min &nbsp;·&nbsp; ≈ ${estUsd}
               </div>
+              {capped && (
+                <div className="mt-1 text-[11px] font-semibold text-orange-300">
+                  Selection has {totalSeeds} seeds; campaign caps at {SUITE_LIMIT} attacks (suite limit).
+                </div>
+              )}
               <div className="mt-3 space-y-1 text-xs text-slate-300">
                 <div>Predicted exploit yield (vs. 7-day baseline): {Math.round(estCycles * 0.05)}–{Math.round(estCycles * 0.08)} PASSes</div>
                 <div>Judges: claude-haiku-4-5 + gpt-4.1-mini, arbitrator claude-sonnet-4-6</div>
