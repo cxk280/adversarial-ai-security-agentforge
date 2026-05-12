@@ -163,6 +163,41 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass
 
+        # One-shot migration: clean slate for documentation_agent_outputs.
+        # The earlier prompt rendered "AUTO-<attack_id>" verbatim inside
+        # the markdown body; those bodies are still in old rows even
+        # after the id-allocator switched to VULN-NNNN. Cheaper to
+        # delete and let the next campaign regenerate with the new
+        # prompt than to do a string-substitution migration over
+        # generated markdown. Idempotent via an audit_log marker row.
+        marker_kind = "migration:reset_doc_agent_outputs_v1"
+        already_ran = conn.execute(
+            "SELECT 1 FROM audit_log WHERE kind = ? LIMIT 1", (marker_kind,)
+        ).fetchone()
+        if not already_ran:
+            conn.execute("DELETE FROM documentation_agent_outputs")
+            # Any user-set status overrides on DB-allocated VULN-NNNN
+            # findings are also dropped — the underlying findings are
+            # gone, the overrides would otherwise dangle.
+            conn.execute(
+                "DELETE FROM finding_status_overrides WHERE finding_id NOT IN ('VULN-0001', 'VULN-0002', 'VULN-0003')"
+            )
+            import uuid as _uuid
+            from datetime import datetime, timezone
+            conn.execute(
+                """
+                INSERT INTO audit_log
+                    (audit_id, kind, actor, commit_sha, ci_url, detail_json, created_at)
+                VALUES
+                    (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _uuid.uuid4().hex, marker_kind, "init_db",
+                    None, None, "{}",
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+
 
 # ─── Run helpers ─────────────────────────────────────────────────────
 
