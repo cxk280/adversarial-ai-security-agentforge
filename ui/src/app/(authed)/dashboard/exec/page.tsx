@@ -71,13 +71,6 @@ export default function ExecPage() {
         tone: (critical > 0 ? "red" : openFindings.length > 0 ? "orange" : "green") as KpiTone["tone"],
       },
       {
-        label: "MEAN TIME TO FIX",
-        value: "4.2",
-        unit: "h",
-        delta: "from threat-model SLO",
-        tone: "green" as KpiTone["tone"],
-      },
-      {
         label: "COVERAGE",
         value: String(coveragePct),
         unit: "% surface",
@@ -180,7 +173,7 @@ export default function ExecPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-3 gap-4">
           {kpis.map((k) => <KpiCard key={k.label} {...k} />)}
         </div>
 
