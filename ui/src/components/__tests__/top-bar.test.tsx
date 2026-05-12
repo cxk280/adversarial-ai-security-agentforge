@@ -9,10 +9,10 @@ describe("TopBar", () => {
     expect(screen.getByText("copilot-agent-dev")).toBeInTheDocument();
   });
 
-  it("has a Run campaign CTA", () => {
+  it("has a Run campaign CTA linking to /run", () => {
     render(<TopBar crumb="X" target="dev" />);
-    expect(
-      screen.getByRole("button", { name: /run campaign/i }),
-    ).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: /run campaign/i });
+    expect(link).toBeInTheDocument();
+    expect(link).toHaveAttribute("href", "/run");
   });
 });

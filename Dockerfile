@@ -46,10 +46,15 @@ COPY service/  ./service/
 COPY evals/    ./evals/
 COPY findings/ ./findings/
 
-# Make sure the SQLite DB lives in a writable path. On Railway the
-# working directory is writable and we don't (yet) attach a volume —
-# DB resets on redeploy, which is fine for MVP (no findings yet).
-ENV ADVERSARY_DB_PATH=/app/adversary.sqlite
+# SQLite DB lives inside /app/data, which is a Railway volume mount
+# point (configured in the dashboard). The volume preserves
+# regression_runs + attempts + audit_log across container restarts
+# and redeploys; without it the DB resets every time Railway rolls
+# a new image, which kills demo continuity. The mkdir is a safety
+# net for local Docker runs without the volume attached — Railway's
+# mount creates the directory automatically.
+RUN mkdir -p /app/data
+ENV ADVERSARY_DB_PATH=/app/data/adversary.sqlite
 
 EXPOSE 8000
 
