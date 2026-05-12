@@ -1,5 +1,14 @@
-"""Attacker client for `huihui-ai/Llama-3.3-70B-Instruct-abliterated`
-hosted on RunPod serverless GPU behind an OpenAI-compatible API.
+"""Attacker client for huihui-ai's abliterated Llama variants hosted on
+RunPod serverless GPU behind an OpenAI-compatible API.
+
+The default `model_name` below targets the 3B-finetuned variant — small
+enough to fit a 24GB RunPod worker comfortably (~6 GB fp16 + KV cache)
+and fast enough that workers come ready in 2–4 min. Architecturally
+this is the same primitive as the 70B; we keep the 70B as the documented
+production target in ARCHITECTURE.md and swap up when GPU capacity
+allows. The Red Team interface is model-agnostic — change `model_name`
+or pass `endpoint_url` to point at a different RunPod endpoint and the
+rest of the pipeline is unaffected.
 
 RunPod's vLLM template exposes `/v1/chat/completions` matching the
 OpenAI request/response shape. Auth is a bearer token on the
@@ -27,7 +36,7 @@ _USD_PER_COMPLETION_TOKEN = 0.0
 
 
 class AbliteratedRunPodClient:
-    model_name = "huihui-ai/Llama-3.3-70B-Instruct-abliterated"
+    model_name = "huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned"
 
     def __init__(
         self,

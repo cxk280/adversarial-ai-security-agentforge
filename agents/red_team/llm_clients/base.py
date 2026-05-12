@@ -30,7 +30,7 @@ class LLMClient(Protocol):
     request-handling model — we'll fire many of these in parallel from the
     Orchestrator."""
 
-    model_name: str  # e.g. "huihui-ai/Llama-3.3-70B-Instruct-abliterated"
+    model_name: str  # e.g. "huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned"
 
     async def complete(
         self,

@@ -129,7 +129,7 @@ adversarial_ai_security_agentforge/
 ## What's shipped (Week 3)
 
 **Multi-agent platform:**
-- **Red Team** seed dispatcher → `huihui-ai/Llama-3.3-70B-Instruct-abliterated` mutator on RunPod serverless → DeepSeek-R1 escalation under any of 7 triggers (`agents/red_team/escalation.py`).
+- **Red Team** seed dispatcher → `huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned` mutator on RunPod serverless (demo/CI tier; `Llama-3.3-70B-Instruct-abliterated` documented as the production tier when GPU capacity allows) → DeepSeek-R1 escalation under any of 7 triggers (`agents/red_team/escalation.py`).
 - **Judge Agent** dual-judge: Primary `claude-haiku-4-5` + Secondary `openai/gpt-4.1-mini` + Arbitrator `claude-sonnet-4-6` on cross-family disagreement. Canary cases inserted at runtime to detect Judge integrity drift.
 - **Documentation Agent** generates `findings/VULN-NNNN.md` from confirmed exploits.
 - **Orchestrator** wires all of the above into `/regression-runs` with budget caps, target allowlist, and per-run + per-attempt persistence.

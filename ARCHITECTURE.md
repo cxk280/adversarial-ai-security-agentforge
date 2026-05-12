@@ -10,7 +10,7 @@
 
 The Clinical Co-Pilot is an LLM-driven assistant connected to live PHI, FHIR tools, clinical guidelines, and a multi-step LangGraph workflow. It is exactly the kind of system where a single jailbreak is uninteresting and a *category* of unaddressed exploits is dangerous. The adversarial platform we are building treats security testing as a continuous, autonomous process — not a static suite — and decomposes that process across four agents with distinct trust levels and distinct models.
 
-**Red Team Agent** generates and mutates attacks. It runs on an *uncensored* local model (`dolphin-llama3:70b` or `huihui-ai/Llama-3.3-70B-Instruct-abliterated` via Ollama) with `deepseek-chat` as a paid escalation for harder mutations. Claude, GPT-4, and GPT-4.1-mini all refuse to generate offensive payloads at scale; using one of them here would silently cap our coverage. The Red Team Agent receives campaign objectives from the Orchestrator (e.g., "produce 20 indirect-injection variants against `/extract` that exfiltrate cross-patient data") and emits attack records into the shared store. Trust level: **low** — output is never executed against anything but the target, and the harness sandboxes payloads.
+**Red Team Agent** generates and mutates attacks. It runs on an *uncensored* abliterated Llama variant from `huihui-ai/*` — `Llama-3.2-3B-Instruct-abliterated-finetuned` for the demo/CI tier (fits a 24GB RunPod worker) and `Llama-3.3-70B-Instruct-abliterated` documented as the production target — with `deepseek-chat` as a paid escalation for harder mutations. Claude, GPT-4, and GPT-4.1-mini all refuse to generate offensive payloads at scale; using one of them here would silently cap our coverage. The Red Team Agent receives campaign objectives from the Orchestrator (e.g., "produce 20 indirect-injection variants against `/extract` that exfiltrate cross-patient data") and emits attack records into the shared store. Trust level: **low** — output is never executed against anything but the target, and the harness sandboxes payloads.
 
 **Judge Agent** evaluates whether an attack succeeded. It runs on `claude-haiku-4-5` — a frontier model whose safety alignment is *helpful* for judgment because the judge must classify, not produce, adversarial behavior. It scores each (attack, response) pair against attack-category-specific rubrics, returns `pass | fail | partial | inconclusive` with a confidence, and escalates `inconclusive` results to a human queue. The judge is structurally independent of the Red Team Agent — different model family, different prompt, different repo path — to prevent the "attacker grading its own homework" failure mode. Trust level: **medium-high**.
 
@@ -33,7 +33,7 @@ Each agent below is a distinct deployable with its own model, its own prompt, it
 | | |
 |---|---|
 | **Responsibility** | Generate, mutate, and escalate adversarial inputs against the target. |
-| **Model (primary)** | `huihui-ai/Llama-3.3-70B-Instruct-abliterated` — refusal direction surgically ablated from the weights, no retraining. Hosted on **RunPod serverless GPU** (A100-40GB, 4-bit quant) behind an OpenAI-compatible endpoint. |
+| **Model (primary)** | `huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned` (demo / CI tier) or `huihui-ai/Llama-3.3-70B-Instruct-abliterated` (production tier when GPU capacity allows) — refusal direction surgically ablated from the weights, no retraining. The fine-tuned 3B recovers instruction-following lost to abliteration and fits a 24GB worker; the 70B is the documented production target as RunPod 80GB-class capacity normalizes. Hosted on **RunPod serverless GPU** behind an OpenAI-compatible endpoint. Client (`abliterated_runpod.py`) is model-agnostic — `model_name` is a single config value. |
 | **Model (escalation)** | `deepseek-reasoner` / `deepseek-chat` (DeepSeek-R1) via API. Escalation triggers in §1.1.1 below. DeepSeek's published refusal rate on offensive-security prompts is materially lower than Claude/GPT/GPT-4.1-mini. |
 | **Inputs** | Campaign brief from Orchestrator: target category, target endpoint, target patient context, prior partials to mutate, budget. |
 | **Outputs** | `attacks` rows: `{id, category, subcategory, payload, strategy, seed_attack_id, generated_at}`. Strategies: `single_turn`, `crescendo`, `tap_branch`, `indirect_injection`, `tool_param_tamper`, `state_poison`, `dos_amplification`, `persona_hijack`. |
@@ -397,7 +397,9 @@ The spec calls this out explicitly: "Commercial frontier models are often traine
 
 ### 7.2 Red Team Agent — what we chose
 
-**Primary:** `huihui-ai/Llama-3.3-70B-Instruct-abliterated`, served on **RunPod serverless GPU** (A100-40GB, 4-bit quant via vLLM or llama.cpp behind an OpenAI-compatible API).
+**Demo / CI tier:** `huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned` on **RunPod serverless GPU** (24 GB-class, fp16 via vLLM, OpenAI-compatible API). Boots a worker in 2–4 min, fits comfortably with KV-cache headroom, and the post-abliteration fine-tune recovers instruction-following.
+
+**Production tier:** `huihui-ai/Llama-3.3-70B-Instruct-abliterated` on a single A100-80GB or H100 (4-bit AWQ quant) when capacity is available, or 2–4× 24GB workers via vLLM tensor-parallelism. Same Red Team interface; the swap is a one-line `model_name` change in `abliterated_runpod.py`.
 
 - "Abliterated" = the refusal-direction has been ablated from the weights; the model loses its hard-no behavior without retraining. Published, reproducible technique; weights live on Hugging Face under `huihui-ai/*`.
 - **Why hosted, not local**: the deployed adversary platform on Railway needs the model reachable from a server, 24/7. RunPod serverless scales to zero when idle (~$0/hr), spins up in 10–30s on demand, and bills ~$0.50–1.50/hr while warm. Major frontier-provider hosts (Together, Anthropic, OpenAI) will not host abliterated weights; RunPod / Modal / Hyperbolic will.
@@ -471,7 +473,7 @@ Per-call USD is computed from `(model, prompt_tokens, completion_tokens)` agains
 | Concern | Choice | Rationale |
 |---|---|---|
 | Multi-agent coordination | **LangGraph** for inter-agent state machine; **PyRIT** for attack mutation strategies | LangGraph is already in the W2 codebase; PyRIT is Microsoft's published red-team framework with battle-tested mutation orchestrators (TAP, crescendo, single/multi-turn). Building from scratch is reinventing the wheel. |
-| Red Team model | `huihui-ai/Llama-3.3-70B-Instruct-abliterated` on RunPod serverless GPU; DeepSeek-R1 API escalation; local Ollama dev fallback | See §7. |
+| Red Team model | `huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned` (demo/CI) or `huihui-ai/Llama-3.3-70B-Instruct-abliterated` (production) on RunPod serverless GPU; DeepSeek-R1 API escalation; local Ollama dev fallback | See §7. |
 | Judge model | `claude-haiku-4-5` | See §7. |
 | Orchestrator / Docs model | `claude-sonnet-4-6` | See §7. |
 | Backend | Python 3.11, FastAPI | Same stack as the W2 agent → shared idioms, shared deploy patterns. |
@@ -540,7 +542,7 @@ Per the spec:
 
 ### Resolved decisions (2026-05-11)
 
-1. **Red Team model**: `huihui-ai/Llama-3.3-70B-Instruct-abliterated` ✓
+1. **Red Team model**: `huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned` for demo/CI tier (24GB worker); `huihui-ai/Llama-3.3-70B-Instruct-abliterated` documented as the production target ✓
 2. **Hosting**: RunPod serverless GPU (Option B), OpenAI-compatible API. Adversary platform on Railway calls it over HTTPS. ✓
 3. **Escalation model**: DeepSeek-R1 via DeepSeek API; user is provisioning the key. ✓
 4. **Authorization scope**: see §13 below. ✓
