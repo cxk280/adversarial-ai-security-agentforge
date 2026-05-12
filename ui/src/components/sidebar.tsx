@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   LayoutDashboard,
   Play,
@@ -11,6 +11,7 @@ import {
   ScrollText,
   BarChart3,
   ShieldAlert,
+  LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -26,6 +27,14 @@ const NAV = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+
+  const logout = async () => {
+    await fetch("/api/logout", { method: "POST" }).catch(() => {});
+    router.replace("/login");
+    router.refresh();
+  };
+
   return (
     <aside className="hidden md:flex w-64 flex-col bg-slate-900 text-slate-100 min-h-screen">
       <div className="px-6 py-5 border-b border-slate-800">
@@ -68,11 +77,19 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="px-4 py-3 border-t border-slate-800 text-xs text-slate-400">
+      <div className="border-t border-slate-800 px-4 py-3 text-xs text-slate-400">
         <div className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
           Authorization Window
         </div>
         <div className="mt-1 text-slate-300">2026-05-11 → 05-22</div>
+        <button
+          type="button"
+          onClick={logout}
+          className="mt-3 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[11px] font-medium text-slate-300 hover:bg-slate-800 hover:text-white"
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          Sign out
+        </button>
       </div>
     </aside>
   );
