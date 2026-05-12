@@ -44,6 +44,17 @@ COPY --from=builder /app/.next        ./.next
 COPY --from=builder /app/public       ./public
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/next.config.ts ./next.config.ts
+COPY --from=builder /app/newrelic.js  ./newrelic.js
+
+# New Relic APM via `-r newrelic` — bootstraps the agent before Next.js
+# boots so route handlers + SSR + API routes are auto-instrumented. The
+# agent reads NEW_RELIC_LICENSE_KEY + NEW_RELIC_APP_NAME from env at
+# load time; when LICENSE_KEY is unset (local dev, CI), the agent warns
+# and the wrapped Next.js process runs normally.
+ENV NEW_RELIC_APP_NAME="adversary-ui" \
+    NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true \
+    NEW_RELIC_LOG_LEVEL=warning \
+    NODE_OPTIONS="-r newrelic"
 
 EXPOSE 3000
 CMD npm run start -- --port ${PORT:-3000}

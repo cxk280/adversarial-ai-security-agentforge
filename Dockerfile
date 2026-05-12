@@ -53,11 +53,20 @@ ENV ADVERSARY_DB_PATH=/app/adversary.sqlite
 
 EXPOSE 8000
 
+# New Relic APM is bootstrapped via `newrelic-admin run-program`. When
+# NEW_RELIC_LICENSE_KEY is unset (local dev, CI), the agent logs a warning
+# and runs the wrapped program normally — no-op fallback. App name +
+# distributed tracing default to env-var-driven config (no .ini file).
+ENV NEW_RELIC_APP_NAME="adversary-agent" \
+    NEW_RELIC_DISTRIBUTED_TRACING_ENABLED=true \
+    NEW_RELIC_LOG=stdout \
+    NEW_RELIC_LOG_LEVEL=warning
+
 # uvicorn with --proxy-headers so Railway's edge can rewrite the
 # client IP correctly. Shell form (not exec form) so ${PORT} is
 # substituted by the shell — Railway sets $PORT to the public port it
 # wants the container to listen on.
-CMD uvicorn service.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers
+CMD newrelic-admin run-program uvicorn service.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:${PORT:-8000}/health || exit 1

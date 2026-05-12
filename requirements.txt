@@ -17,8 +17,9 @@ httpx>=0.26
 anthropic>=0.40
 openai>=1.50
 
-# Observability — Langfuse. Per ARCHITECTURE.md §8 we reuse the
-# self-hosted W2 instance; this app gets its own project inside it.
-# When the LANGFUSE_* env vars are unset the SDK no-ops, so the import
-# is always safe.
+# Observability — Langfuse for LLM-specific traces (per ARCHITECTURE.md §8;
+# reuses self-hosted W2 instance, separate project) and New Relic APM for
+# service-level health (HTTP throughput, p95 latency, exception aggregation).
+# Both are env-var driven and degrade to no-op when keys are absent.
 langfuse>=2.50
+newrelic>=10.0
