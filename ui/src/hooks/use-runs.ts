@@ -8,6 +8,7 @@ import {
   listFindings,
   getFinding,
   listAttempts,
+  getCoverage,
   type RunSummary,
 } from "@/lib/api";
 
@@ -64,5 +65,13 @@ export function useAttempts(runId: string | undefined) {
     queryFn: () => listAttempts(runId!),
     enabled: !!runId,
     refetchInterval: 5_000,
+  });
+}
+
+export function useCoverage() {
+  return useQuery({
+    queryKey: ["coverage"],
+    queryFn: () => getCoverage(),
+    refetchInterval: 30_000,
   });
 }

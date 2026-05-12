@@ -135,6 +135,14 @@ async def get_run_attempts(
     return {"run_id": run_id, "attempts": attempts, "count": len(attempts)}
 
 
+@router.get("/coverage")
+async def get_coverage(_token: str = Depends(require_bearer)) -> dict:
+    """Per-(category, subcategory) attempt aggregates for the live Coverage
+    matrix. The UI merges these with the static threat-model taxonomy so
+    untested subcategories still appear, but tested ones get real numbers."""
+    return {"rows": db.coverage_by_subcategory()}
+
+
 @router.post("/regression-runs/{run_id}/cancel")
 async def cancel_run(
     run_id: str,

@@ -174,3 +174,20 @@ export interface Attempt {
 export function listAttempts(runId: string): Promise<{ run_id: string; attempts: Attempt[]; count: number }> {
   return request(`/regression-runs/${encodeURIComponent(runId)}/attempts`);
 }
+
+
+// ─── Coverage (subcategory-level aggregates) ──────────────────
+
+export interface CoverageRow {
+  category: string;
+  subcategory: string;
+  cases: number;
+  exploits: number;
+  held: number;
+  partial: number;
+  last_run_at: string | null;
+}
+
+export function getCoverage(): Promise<{ rows: CoverageRow[] }> {
+  return request(`/coverage`);
+}

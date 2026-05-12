@@ -1,51 +1,107 @@
+"use client";
+
+import { useMemo } from "react";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
-import { prettySnake, pct } from "@/lib/format";
+import { prettySnake, pct, relativeTime } from "@/lib/format";
+import { useCoverage } from "@/hooks/use-runs";
 
-interface Row {
+/** Static priority ranking from THREAT_MODEL.md. The 17 leaves never
+ * change between runs; only the per-row stats do. We carry this table
+ * here so untested subcategories still render with their priority. */
+interface TaxonRow {
   rank: number;
   cat: string;
   sub: string;
   sev: number;
   pri: number;
-  cases: number;
-  passRate: number | null;
-  exploits: number;
-  last: string;
-  state: "untested" | "red" | "orange" | "green";
 }
 
-const ROWS: Row[] = [
-  { rank: 1,  cat: "data_exfiltration",          sub: "Authorization bypass",   sev: 9,  pri: 7.2, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 2,  cat: "data_exfiltration",          sub: "Cross-patient leakage",  sev: 10, pri: 7.0, cases: 20, passRate: 0.90, exploits: 2, last: "14m ago", state: "red"      },
-  { rank: 3,  cat: "prompt_injection",           sub: "Indirect",                sev: 9,  pri: 6.3, cases: 10, passRate: 1.00, exploits: 0, last: "33m ago", state: "green"    },
-  { rank: 4,  cat: "prompt_injection",           sub: "Multi-turn / crescendo",  sev: 8,  pri: 5.6, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 5,  cat: "state_corruption",           sub: "History manipulation",    sev: 8,  pri: 5.6, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 6,  cat: "data_exfiltration",          sub: "PHI leakage",             sev: 9,  pri: 5.4, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 7,  cat: "identity_role_exploitation", sub: "Persona hijack",          sev: 10, pri: 5.0, cases: 15, passRate: 1.00, exploits: 0, last: "20m ago", state: "green"    },
-  { rank: 8,  cat: "tool_misuse",                sub: "Parameter tampering",     sev: 7,  pri: 4.9, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 9,  cat: "identity_role_exploitation", sub: "Privilege escalation",    sev: 7,  pri: 4.9, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 10, cat: "state_corruption",           sub: "Context poisoning",       sev: 7,  pri: 4.9, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 11, cat: "identity_role_exploitation", sub: "Trust boundary violation", sev: 8, pri: 4.8, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 12, cat: "prompt_injection",           sub: "Direct",                  sev: 6,  pri: 4.8, cases: 12, passRate: 0.92, exploits: 1, last: "33m ago", state: "orange"   },
-  { rank: 13, cat: "denial_of_service",          sub: "Token exhaustion",        sev: 5,  pri: 4.5, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 14, cat: "denial_of_service",          sub: "Cost amplification",      sev: 5,  pri: 4.0, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 15, cat: "tool_misuse",                sub: "Unintended invocation",   sev: 5,  pri: 3.5, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 16, cat: "tool_misuse",                sub: "Recursive tool calls",    sev: 5,  pri: 3.5, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
-  { rank: 17, cat: "denial_of_service",          sub: "Infinite loops",          sev: 4,  pri: 2.8, cases: 0,  passRate: null, exploits: 0, last: "never",   state: "untested" },
+const TAXON: TaxonRow[] = [
+  { rank: 1,  cat: "data_exfiltration",          sub: "Authorization bypass",     sev: 9,  pri: 7.2 },
+  { rank: 2,  cat: "data_exfiltration",          sub: "Cross-patient leakage",    sev: 10, pri: 7.0 },
+  { rank: 3,  cat: "prompt_injection",           sub: "Indirect",                  sev: 9,  pri: 6.3 },
+  { rank: 4,  cat: "prompt_injection",           sub: "Multi-turn / crescendo",   sev: 8,  pri: 5.6 },
+  { rank: 5,  cat: "state_corruption",           sub: "History manipulation",     sev: 8,  pri: 5.6 },
+  { rank: 6,  cat: "data_exfiltration",          sub: "PHI leakage",              sev: 9,  pri: 5.4 },
+  { rank: 7,  cat: "identity_role_exploitation", sub: "Persona hijack",           sev: 10, pri: 5.0 },
+  { rank: 8,  cat: "tool_misuse",                sub: "Parameter tampering",      sev: 7,  pri: 4.9 },
+  { rank: 9,  cat: "identity_role_exploitation", sub: "Privilege escalation",     sev: 7,  pri: 4.9 },
+  { rank: 10, cat: "state_corruption",           sub: "Context poisoning",        sev: 7,  pri: 4.9 },
+  { rank: 11, cat: "identity_role_exploitation", sub: "Trust boundary violation", sev: 8,  pri: 4.8 },
+  { rank: 12, cat: "prompt_injection",           sub: "Direct",                   sev: 6,  pri: 4.8 },
+  { rank: 13, cat: "denial_of_service",          sub: "Token exhaustion",         sev: 5,  pri: 4.5 },
+  { rank: 14, cat: "denial_of_service",          sub: "Cost amplification",       sev: 5,  pri: 4.0 },
+  { rank: 15, cat: "tool_misuse",                sub: "Unintended invocation",    sev: 5,  pri: 3.5 },
+  { rank: 16, cat: "tool_misuse",                sub: "Recursive tool calls",     sev: 5,  pri: 3.5 },
+  { rank: 17, cat: "denial_of_service",          sub: "Infinite loops",           sev: 4,  pri: 2.8 },
 ];
 
-const STATE_STYLE: Record<Row["state"], string> = {
+type RowState = "untested" | "red" | "orange" | "green";
+
+const STATE_STYLE: Record<RowState, string> = {
   untested: "bg-amber-50/80 text-slate-700",
   red:      "bg-red-500 text-white",
   orange:   "bg-orange-500 text-white",
   green:    "bg-green-200 text-slate-900",
 };
 
+/** Normalize: agent-side seeds tag attempts as category/subcategory.
+ * Match against the taxonomy's sub field (case-insensitive). */
+function rowKey(cat: string, sub: string) {
+  return `${cat.toLowerCase()}/${sub.toLowerCase()}`;
+}
+
 export default function CoveragePage() {
-  const tested = ROWS.filter((r) => r.cases > 0).length;
-  const untested = ROWS.length - tested;
-  const withExploits = ROWS.filter((r) => r.exploits > 0).length;
+  const { data, isLoading, error } = useCoverage();
+
+  const rows = useMemo(() => {
+    const live = new Map<
+      string,
+      { cases: number; exploits: number; held: number; partial: number; last: string | null }
+    >();
+    for (const r of data?.rows ?? []) {
+      live.set(rowKey(r.category, r.subcategory), {
+        cases: r.cases,
+        exploits: r.exploits ?? 0,
+        held: r.held ?? 0,
+        partial: r.partial ?? 0,
+        last: r.last_run_at,
+      });
+    }
+    return TAXON.map((t) => {
+      const hit = live.get(rowKey(t.cat, t.sub));
+      const cases = hit?.cases ?? 0;
+      const exploits = hit?.exploits ?? 0;
+      const held = hit?.held ?? 0;
+      const partial = hit?.partial ?? 0;
+      // Pass-held rate: held / (held+exploits+partial+inconclusive). We
+      // approximate inconclusive as cases - (held+exploits+partial).
+      const inconclusive = Math.max(0, cases - (held + exploits + partial));
+      const denom = held + exploits + partial + inconclusive;
+      const passRate = denom === 0 ? null : held / denom;
+      const state: RowState =
+        cases === 0
+          ? "untested"
+          : exploits > 0
+            ? "red"
+            : passRate !== null && passRate < 0.95
+              ? "orange"
+              : "green";
+      return {
+        ...t,
+        cases,
+        exploits,
+        passRate,
+        last: hit?.last ?? null,
+        state,
+      };
+    });
+  }, [data]);
+
+  const tested = rows.filter((r) => r.cases > 0).length;
+  const untested = rows.length - tested;
+  const withExploits = rows.filter((r) => r.exploits > 0).length;
 
   return (
     <div className="-mx-8 -my-6">
@@ -54,7 +110,7 @@ export default function CoveragePage() {
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Coverage matrix</h1>
           <p className="text-sm text-slate-600">
-            {ROWS.length} ranked subcategories from THREAT_MODEL.md &nbsp;·&nbsp; {tested} tested &nbsp;·&nbsp; {untested} untested &nbsp;·&nbsp; {withExploits} with confirmed exploits
+            {rows.length} ranked subcategories from THREAT_MODEL.md &nbsp;·&nbsp; {tested} tested &nbsp;·&nbsp; {untested} untested &nbsp;·&nbsp; {withExploits} with confirmed exploits
           </p>
         </div>
 
@@ -70,7 +126,17 @@ export default function CoveragePage() {
             <div>Exploits</div>
             <div>Last Run</div>
           </div>
-          {ROWS.map((r) => (
+          {isLoading && (
+            <div className="px-5 py-10 text-center text-sm text-slate-500">
+              Loading coverage…
+            </div>
+          )}
+          {error && (
+            <div className="px-5 py-8 text-center text-sm text-red-600">
+              Couldn&apos;t reach /coverage on adversary-agent.
+            </div>
+          )}
+          {!isLoading && !error && rows.map((r) => (
             <div
               key={`${r.cat}/${r.sub}`}
               className="grid grid-cols-[50px_1.2fr_2fr_70px_90px_70px_140px_90px_90px] gap-3 border-b border-amber-50 px-4 py-3 last:border-b-0"
@@ -117,8 +183,8 @@ export default function CoveragePage() {
               )}>{r.exploits > 0 ? `🚨 ${r.exploits}` : "0"}</div>
               <div className={cn(
                 "self-center text-[11px]",
-                r.last === "never" ? "text-slate-400" : "text-slate-500",
-              )}>{r.last}</div>
+                !r.last ? "text-slate-400" : "text-slate-500",
+              )}>{r.last ? relativeTime(r.last) : "never"}</div>
             </div>
           ))}
         </section>

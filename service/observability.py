@@ -13,7 +13,13 @@ Configuration:
 
 If any of the three is missing, every helper here is a silent no-op,
 so the runner doesn't error in environments without observability
-configured (per `feedback_no_local_langfuse`)."""
+configured (per `feedback_no_local_langfuse`).
+
+Targets Langfuse SDK v4 (OpenTelemetry-based). The v2/v3 `client.trace()`
+shape was removed; v4 uses `start_as_current_observation(name, as_type=...)`
+for context-managed spans and `update_current_trace()` for trace-level
+metadata. We thread a child OTEL context manually because we yield the
+span across async/sync boundaries in the runner."""
 
 from __future__ import annotations
 
@@ -40,12 +46,12 @@ def _client_or_none() -> Any | None:
         _client = _DISABLED
         return None
     try:
-        from langfuse import Langfuse  # type: ignore[import-not-found]
+        from langfuse import get_client  # type: ignore[import-not-found]
     except ImportError:
         _client = _DISABLED
         return None
     try:
-        _client = Langfuse(host=host, public_key=pk, secret_key=sk)
+        _client = get_client()
         return _client
     except Exception as exc:
         print(f"[observability] Langfuse init failed: {exc}")
@@ -55,64 +61,81 @@ def _client_or_none() -> Any | None:
 
 @contextmanager
 def trace_run(run_id: str, target_url: str, suite_ref: str):
-    """Top-level Langfuse trace for one regression run."""
+    """Top-level Langfuse span for one regression run."""
     client = _client_or_none()
-    trace = None
-    if client is not None:
-        try:
-            trace = client.trace(
-                name="regression_run",
-                id=run_id,
-                input={"target_url": target_url, "suite_ref": suite_ref},
-                tags=["adversary-agent", suite_ref],
-                metadata={"target": target_url},
-            )
-        except Exception as exc:
-            print(f"[observability] trace_run failed: {exc}")
-            trace = None
+    if client is None:
+        yield None
+        return
     try:
-        yield trace
-    finally:
-        if client is not None:
+        with client.start_as_current_observation(
+            name=f"regression_run:{run_id}",
+            as_type="span",
+            input={"target_url": target_url, "suite_ref": suite_ref},
+            metadata={"target": target_url, "run_id": run_id},
+        ) as span:
             try:
-                client.flush()
+                client.update_current_trace(
+                    name=f"regression_run:{run_id}",
+                    tags=["adversary-agent", suite_ref],
+                    metadata={"target": target_url, "run_id": run_id},
+                )
             except Exception:
                 pass
+            try:
+                yield span
+            finally:
+                try:
+                    client.flush()
+                except Exception:
+                    pass
+    except Exception as exc:
+        print(f"[observability] trace_run failed: {exc}")
+        yield None
 
 
 @contextmanager
 def trace_attack(run_trace, *, attack_id: str, category: str, subcategory: str, source: str):
-    """Per-attack span nested under a regression-run trace."""
-    span = None
-    if run_trace is not None:
-        try:
-            span = run_trace.span(
-                name="attack",
-                input={"attack_id": attack_id, "source": source},
-                metadata={"category": category, "subcategory": subcategory},
-            )
-        except Exception:
-            span = None
+    """Per-attack span nested under a regression-run trace.
+
+    In v4, observation nesting is driven by OTEL context. As long as we
+    open this span inside the `with trace_run(...)` block in the runner,
+    Langfuse threads it under the parent automatically."""
+    if run_trace is None:
+        yield None
+        return
+    client = _client_or_none()
+    if client is None:
+        yield None
+        return
     try:
-        yield span
-    finally:
-        if span is not None:
-            try:
-                span.end()
-            except Exception:
-                pass
+        with client.start_as_current_observation(
+            name=f"attack:{category}/{subcategory}",
+            as_type="span",
+            input={"attack_id": attack_id, "source": source},
+            metadata={"category": category, "subcategory": subcategory},
+        ) as span:
+            yield span
+    except Exception as exc:
+        print(f"[observability] trace_attack failed: {exc}")
+        yield None
 
 
 def log_judge_verdict(span, *, model: str, verdict: str, rationale: str, usd_cost: float) -> None:
-    """Attach a Judge verdict as a generation on the attack span."""
+    """Attach a Judge verdict as a generation observation under the
+    currently active OTEL context (the attack span)."""
     if span is None:
         return
+    client = _client_or_none()
+    if client is None:
+        return
     try:
-        span.generation(
+        with client.start_as_current_observation(
             name=f"judge:{model}",
+            as_type="generation",
             model=model,
             output={"verdict": verdict, "rationale": rationale},
             metadata={"usd_cost": usd_cost},
-        )
+        ):
+            pass
     except Exception:
         pass

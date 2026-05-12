@@ -171,6 +171,28 @@ def list_attempts(run_id: str) -> list[dict[str, Any]]:
     return [_row_to_dict(r) for r in rows]
 
 
+def coverage_by_subcategory() -> list[dict[str, Any]]:
+    """Aggregate attempts by (category, subcategory): case count, pass-held
+    rate, exploit count, last-seen timestamp. Used to derive the live
+    Coverage matrix from real runs rather than a hardcoded table."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                category,
+                subcategory,
+                COUNT(*)                                       AS cases,
+                SUM(CASE WHEN verdict = 'pass' THEN 1 ELSE 0 END) AS exploits,
+                SUM(CASE WHEN verdict = 'fail' THEN 1 ELSE 0 END) AS held,
+                SUM(CASE WHEN verdict = 'partial' THEN 1 ELSE 0 END) AS partial,
+                MAX(started_at)                                AS last_run_at
+            FROM attempts
+            GROUP BY category, subcategory
+            """,
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def insert_audit(row: dict[str, Any]) -> None:
     with get_conn() as conn:
         conn.execute(
