@@ -12,5 +12,11 @@ export default defineConfig({
     globals: true,
     setupFiles: ["./src/test-setup.ts"],
     css: false,
+    // Vitest's default include matches *.test.ts*; default exclude includes
+    // node_modules/dist/etc. but NOT e2e/, so Vitest would try to load
+    // Playwright specs and choke on `test.describe()` since the two
+    // frameworks export different `test` symbols.
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
+    exclude: ["**/node_modules/**", "**/dist/**", "e2e/**", "playwright-report/**"],
   },
 });

@@ -13,26 +13,31 @@ import pytest
 os.environ.setdefault("ADVERSARY_DB_PATH", ":memory:")
 
 
+def _build_app():
+    """Reload the service module so it sees the current env, then run
+    the FastAPI lifespan (which calls db.init_db) once before returning
+    the bare app. Tests that follow should use the returned app inside
+    a `with TestClient(app) as client:` block — TestClient's context
+    manager actually invokes lifespan on enter."""
+    import importlib
+    from service import db as db_mod
+    from service import main as main_mod
+    importlib.reload(db_mod)
+    importlib.reload(main_mod)
+    return main_mod.app
+
+
 def _client_no_auth_disabled():
-    """Build a TestClient WITHOUT ADVERSARY_DISABLE_AUTH set, so bearer
-    checks are enforced. The test that exercises auth needs this."""
     os.environ["ADVERSARY_API_TOKEN"] = "test-token-secret"
     os.environ.pop("ADVERSARY_DISABLE_AUTH", None)
-    # Force re-import so the module reads our env.
-    import importlib
-    from service import main as main_mod
-    importlib.reload(main_mod)
     from fastapi.testclient import TestClient
-    return TestClient(main_mod.app)
+    return TestClient(_build_app())
 
 
 def _client_auth_disabled():
     os.environ["ADVERSARY_DISABLE_AUTH"] = "1"
-    import importlib
-    from service import main as main_mod
-    importlib.reload(main_mod)
     from fastapi.testclient import TestClient
-    return TestClient(main_mod.app)
+    return TestClient(_build_app())
 
 
 # ─── Bearer enforcement ────────────────────────────────────────────────
@@ -105,16 +110,24 @@ def test_non_allowlisted_target_rejected(evil_url):
         ("source_url", "javascript:alert(1)"),
     ],
 )
-def test_injection_inputs_dont_crash_or_execute(field, value):
+def test_injection_inputs_dont_crash_or_execute(field, value, tmp_path):
     """The API must accept (and either validate or sanitize) hostile
     inputs without crashing or executing them. We don't check the
     exact response code — just that it's NOT 500 (which would mean
-    the input crashed the parser/dispatcher)."""
-    client = _client_auth_disabled()
+    the input crashed the parser/dispatcher).
+
+    Uses TestClient as a context manager so the FastAPI lifespan runs
+    and creates the SQLite schema first."""
+    # Fresh DB per parametrization so writes don't accumulate.
+    os.environ["ADVERSARY_DB_PATH"] = str(tmp_path / "test.sqlite")
+    os.environ["ADVERSARY_DISABLE_AUTH"] = "1"
+    app = _build_app()
     body = {
         "target_url": "https://copilot-agent-dev.up.railway.app",
         "suite_ref": "promotion-gate-v1",
     }
     body[field] = value
-    r = client.post("/regression-runs", json=body)
+    from fastapi.testclient import TestClient
+    with TestClient(app) as client:
+        r = client.post("/regression-runs", json=body)
     assert r.status_code < 500, f"Server-side crash on injection in {field!r}: {r.text[:200]}"
