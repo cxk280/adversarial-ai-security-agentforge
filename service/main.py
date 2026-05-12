@@ -19,6 +19,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from service import db
 from service.api import audit, runs
@@ -38,6 +39,23 @@ app = FastAPI(
         "scope: see ARCHITECTURE.md §13."
     ),
     lifespan=lifespan,
+)
+
+# CORS — the adversary-ui dashboard runs on a different origin than the
+# adversary-agent service. We allow the deployed UI URLs + localhost dev.
+# Tightening to a regex makes accidental adversary-agent-XYZ targets fail
+# loudly rather than silently expanding the trusted set.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origin_regex=(
+        r"^https://adversary-ui(-dev|-qa|-production)?\.up\.railway\.app$"
+        r"|^http://localhost:\d+$"
+    ),
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
+    expose_headers=["X-Request-Id"],
+    max_age=86400,
 )
 
 
