@@ -32,6 +32,7 @@ from harness import CoPilotExecutor, new_session_id, run_assertions
 from harness.allowlist import TargetNotAllowedError
 from service import db
 from service.models import now_iso
+from service.observability import log_judge_verdict, trace_attack, trace_run
 
 
 SEEDS_ROOT = "evals/seeds"
@@ -170,38 +171,39 @@ async def execute_run(run_id: str, target_url: str, suite_ref: str) -> None:
     high_sev_passes = 0
     t0 = time.monotonic()
 
-    for atk in seeds:
-        spend, verdict = await _run_one(atk, executor, judge, run_id)
-        if spend < 0:
-            return  # hard-stopped mid-run
-        total_spend += spend
-        totals[verdict] = totals.get(verdict, 0) + 1
-        if verdict == "pass" and _is_high_sev(atk):
-            high_sev_passes += 1
+    with trace_run(run_id, target_url, suite_ref) as run_tr:
+        for atk in seeds:
+            spend, verdict = await _run_one(atk, executor, judge, run_id, run_tr)
+            if spend < 0:
+                return  # hard-stopped mid-run
+            total_spend += spend
+            totals[verdict] = totals.get(verdict, 0) + 1
+            if verdict == "pass" and _is_high_sev(atk):
+                high_sev_passes += 1
 
-        # Mutation pass — only on seeds, not on existing mutations
-        if mutator is not None and atk.source == "seed":
-            try:
-                variants = await mutator.mutate(
-                    atk,
-                    n=n_mutations,
-                    state=CampaignState(
-                        category=atk.category,
-                        subcategory=atk.subcategory,
-                    ),
-                )
-            except Exception as exc:
-                print(f"[runner] mutate({atk.id}) failed: {exc}")
-                variants = []
-            for v in variants:
-                vspend, vverdict = await _run_one(v, executor, judge, run_id)
-                if vspend < 0:
-                    return
-                total_spend += vspend
-                total_spend += float(v.metadata.get("usd_cost", 0.0))
-                totals[vverdict] = totals.get(vverdict, 0) + 1
-                if vverdict == "pass" and _is_high_sev(v):
-                    high_sev_passes += 1
+            # Mutation pass — only on seeds, not on existing mutations
+            if mutator is not None and atk.source == "seed":
+                try:
+                    variants = await mutator.mutate(
+                        atk,
+                        n=n_mutations,
+                        state=CampaignState(
+                            category=atk.category,
+                            subcategory=atk.subcategory,
+                        ),
+                    )
+                except Exception as exc:
+                    print(f"[runner] mutate({atk.id}) failed: {exc}")
+                    variants = []
+                for v in variants:
+                    vspend, vverdict = await _run_one(v, executor, judge, run_id, run_tr)
+                    if vspend < 0:
+                        return
+                    total_spend += vspend
+                    total_spend += float(v.metadata.get("usd_cost", 0.0))
+                    totals[vverdict] = totals.get(vverdict, 0) + 1
+                    if vverdict == "pass" and _is_high_sev(v):
+                        high_sev_passes += 1
 
     duration_s = int(time.monotonic() - t0) if seeds else 0
     gate_verdict = "fail" if high_sev_passes > 0 else "pass"
@@ -223,76 +225,96 @@ async def execute_run(run_id: str, target_url: str, suite_ref: str) -> None:
     )
 
 
-async def _run_one(atk: Attack, executor, judge, run_id: str):
+async def _run_one(atk: Attack, executor, judge, run_id: str, run_tr=None):
     """Dispatch one attack and write its attempt row. Returns
     (spend_usd, verdict). Returns (-1, '') if the run must hard-stop
     (e.g., allowlist violation mid-run)."""
     session_id = new_session_id()
-    try:
-        result = await asyncio.to_thread(
-            executor.chat,
-            attack_id=atk.id,
-            campaign_id=run_id,
-            session_id=session_id,
-            patient_id=atk.active_patient_id,
-            message=atk.payload,
-            active_user=atk.active_user,
-            endpoint=atk.endpoint,
-        )
-    except TargetNotAllowedError:
-        db.update_run(
-            run_id,
-            {
-                "state": "failed",
-                "ended_at": now_iso(),
-                "gate_json": json.dumps(
-                    {
-                        "verdict": "error",
-                        "reasons": ["target became non-allowlisted mid-run"],
-                    }
-                ),
-            },
-        )
-        return -1.0, ""
-
-    # Deterministic Judge — always
-    det_verdict, _ = run_assertions(result.response_text, atk.assertions)
-    verdict = det_verdict
-    spend = 0.0
-    rationale = ""
-
-    # LLM Judge — if configured
-    if judge is not None:
+    with trace_attack(
+        run_tr,
+        attack_id=atk.id,
+        category=atk.category,
+        subcategory=atk.subcategory,
+        source=atk.source,
+    ) as att_span:
         try:
-            final = await judge.score(
-                attack=atk.payload,
-                target_response=result.response_text or "",
-                rubric=_rubric_for(atk.category),
-                category=atk.category,
-                subcategory=atk.subcategory,
+            result = await asyncio.to_thread(
+                executor.chat,
+                attack_id=atk.id,
+                campaign_id=run_id,
+                session_id=session_id,
+                patient_id=atk.active_patient_id,
+                message=atk.payload,
+                active_user=atk.active_user,
+                endpoint=atk.endpoint,
             )
-            verdict = final.verdict
-            spend = final.total_usd
-            rationale = final.rationale
-        except Exception as exc:
-            print(f"[runner] LLM Judge failed for {atk.id}: {exc}; using deterministic verdict")
-            verdict = det_verdict
+        except TargetNotAllowedError:
+            db.update_run(
+                run_id,
+                {
+                    "state": "failed",
+                    "ended_at": now_iso(),
+                    "gate_json": json.dumps(
+                        {
+                            "verdict": "error",
+                            "reasons": ["target became non-allowlisted mid-run"],
+                        }
+                    ),
+                },
+            )
+            return -1.0, ""
 
-    db.insert_attempt(
-        {
-            "attempt_id": uuid.uuid4().hex,
-            "run_id": run_id,
-            "seed_id": atk.id,
-            "category": atk.category,
-            "subcategory": atk.subcategory,
-            "verdict": verdict,
-            "response_text": (result.response_text or "")[:8000],
-            "latency_ms": result.latency_ms,
-            "spend_usd": spend,
-            "started_at": now_iso(),
-        }
-    )
-    return spend, verdict
+        # Deterministic Judge — always
+        det_verdict, _ = run_assertions(result.response_text, atk.assertions)
+        verdict = det_verdict
+        spend = 0.0
+        rationale = ""
+
+        # LLM Judge — if configured
+        if judge is not None:
+            try:
+                final = await judge.score(
+                    attack=atk.payload,
+                    target_response=result.response_text or "",
+                    rubric=_rubric_for(atk.category),
+                    category=atk.category,
+                    subcategory=atk.subcategory,
+                )
+                verdict = final.verdict
+                spend = final.total_usd
+                rationale = final.rationale
+                log_judge_verdict(att_span, model=final.primary.model,
+                                  verdict=final.primary.verdict,
+                                  rationale=final.primary.rationale,
+                                  usd_cost=final.primary.usd_cost)
+                log_judge_verdict(att_span, model=final.secondary.model,
+                                  verdict=final.secondary.verdict,
+                                  rationale=final.secondary.rationale,
+                                  usd_cost=final.secondary.usd_cost)
+                if final.arbitrator is not None:
+                    log_judge_verdict(att_span, model=final.arbitrator.model,
+                                      verdict=final.arbitrator.verdict,
+                                      rationale=final.arbitrator.rationale,
+                                      usd_cost=final.arbitrator.usd_cost)
+            except Exception as exc:
+                print(f"[runner] LLM Judge failed for {atk.id}: {exc}; using deterministic verdict")
+                verdict = det_verdict
+
+        db.insert_attempt(
+            {
+                "attempt_id": uuid.uuid4().hex,
+                "run_id": run_id,
+                "seed_id": atk.id,
+                "category": atk.category,
+                "subcategory": atk.subcategory,
+                "verdict": verdict,
+                "response_text": (result.response_text or "")[:8000],
+                "latency_ms": result.latency_ms,
+                "spend_usd": spend,
+                "started_at": now_iso(),
+            }
+        )
+        return spend, verdict
 
 
 def _is_high_sev(attack) -> bool:

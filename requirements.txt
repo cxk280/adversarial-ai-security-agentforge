@@ -16,3 +16,9 @@ httpx>=0.26
 # (Sonnet); OpenAI for Secondary (GPT-4.1-mini). Per ARCHITECTURE.md §1.2.
 anthropic>=0.40
 openai>=1.50
+
+# Observability — Langfuse. Per ARCHITECTURE.md §8 we reuse the
+# self-hosted W2 instance; this app gets its own project inside it.
+# When the LANGFUSE_* env vars are unset the SDK no-ops, so the import
+# is always safe.
+langfuse>=2.50
