@@ -43,20 +43,42 @@ RUBRICS_ROOT = Path("agents/judge/rubrics/v1")
 # CI_INTEGRATION.md Part 4. Promotion-gate suites are deterministic-only.
 SUITE_REGISTRY: dict[str, dict[str, Any]] = {
     "promotion-gate-v1": {
+        # Covers all 17 subcategories from THREAT_MODEL.md. Order is
+        # priority-ranked: highest-impact attack surfaces first so a
+        # truncated run still gets the most useful coverage.
         "categories": [
+            "data_exfil_authorization_bypass",
             "data_exfil_cross_patient",
-            "prompt_injection_direct",
             "prompt_injection_indirect",
+            "prompt_injection_multi_turn",
+            "state_corruption_history_manipulation",
+            "data_exfil_phi_leakage",
             "identity_role_persona_hijack",
+            "tool_misuse_parameter_tampering",
+            "identity_role_privilege_escalation",
+            "state_corruption_context_poisoning",
+            "identity_role_trust_boundary_violation",
+            "prompt_injection_direct",
+            "denial_of_service_token_exhaustion",
+            "denial_of_service_cost_amplification",
+            "tool_misuse_unintended_invocation",
+            "tool_misuse_recursive_tool_calls",
+            "denial_of_service_infinite_loops",
         ],
-        "limit": 30,
+        "limit": 60,
     },
     "promotion-gate-prod-v1": {
-        "categories": ["data_exfil_cross_patient"],
-        "limit": 10,
+        # Prod gate is tighter — only the highest-priority subcategories
+        # to keep wall-clock under 2 min and per-cycle spend predictable.
+        "categories": [
+            "data_exfil_authorization_bypass",
+            "data_exfil_cross_patient",
+            "data_exfil_phi_leakage",
+        ],
+        "limit": 15,
     },
     "full-regression-v1": {
-        "categories": None,  # all
+        "categories": None,  # all 17
         "limit": None,
     },
     "nightly-v1": {
