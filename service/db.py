@@ -84,6 +84,29 @@ CREATE TABLE IF NOT EXISTS audit_log (
     created_at  TEXT NOT NULL
 );
 
+-- Documentation Agent output (ARCHITECTURE.md §1.3). One row per
+-- attack_id (a seed_id) for which Sonnet has generated a polished
+-- VULN-NNNN-shape markdown writeup. GET /findings prefers this body
+-- over the auto-generated stub when present, so the dashboard shows
+-- the curated version without manual VULN-NNNN.md authoring.
+CREATE TABLE IF NOT EXISTS documentation_agent_outputs (
+    attack_id     TEXT PRIMARY KEY,
+    title         TEXT NOT NULL,
+    severity      TEXT NOT NULL,
+    body_markdown TEXT NOT NULL,
+    campaign_id   TEXT NOT NULL,
+    model         TEXT NOT NULL,
+    generated_at  TEXT NOT NULL,
+    -- Tracks the Documentation Agent's lifecycle for this attack_id:
+    --   in_progress  Sonnet call in flight; body is a placeholder
+    --   completed    body_markdown holds the polished writeup
+    --   failed       body_markdown holds an error stub; generated_at
+    --                is the failure time
+    -- The findings API uses this to surface a "writing…" indicator
+    -- while the agent is still working.
+    status        TEXT NOT NULL DEFAULT 'completed'
+);
+
 -- Finding status overlay. The on-disk VULN-NNNN.md is the source of
 -- truth for content (title, severity, body, repro); status is the one
 -- field that can be mutated at runtime via PATCH /findings/{id}/status.
@@ -114,6 +137,7 @@ def init_db() -> None:
         # redeploys, so we need to retro-add new columns.
         for ddl in (
             "ALTER TABLE regression_runs ADD COLUMN langfuse_trace_url TEXT",
+            "ALTER TABLE documentation_agent_outputs ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'",
         ):
             try:
                 conn.execute(ddl)
@@ -194,6 +218,51 @@ def list_attempts(run_id: str) -> list[dict[str, Any]]:
             (run_id,),
         ).fetchall()
     return [_row_to_dict(r) for r in rows]
+
+
+def get_doc_agent_output(attack_id: str) -> dict[str, Any] | None:
+    """Return the Documentation Agent's polished writeup for an
+    attack_id, or None if none has been generated yet."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM documentation_agent_outputs WHERE attack_id = ?",
+            (attack_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_doc_agent_outputs() -> dict[str, dict[str, Any]]:
+    """All DocAgent outputs as {attack_id → row}. Used by the list
+    endpoint to apply the polish in a single round-trip."""
+    with get_conn() as conn:
+        rows = conn.execute("SELECT * FROM documentation_agent_outputs").fetchall()
+    return {r["attack_id"]: dict(r) for r in rows}
+
+
+def upsert_doc_agent_output(row: dict[str, Any]) -> None:
+    """Insert-or-update the Doc Agent writeup for an attack_id. Row
+    must include attack_id, title, severity, body_markdown,
+    campaign_id, model, generated_at. Optionally `status` (default
+    'completed')."""
+    payload = {"status": "completed", **row}
+    with get_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO documentation_agent_outputs
+                (attack_id, title, severity, body_markdown, campaign_id, model, generated_at, status)
+            VALUES
+                (:attack_id, :title, :severity, :body_markdown, :campaign_id, :model, :generated_at, :status)
+            ON CONFLICT(attack_id) DO UPDATE SET
+                title         = excluded.title,
+                severity      = excluded.severity,
+                body_markdown = excluded.body_markdown,
+                campaign_id   = excluded.campaign_id,
+                model         = excluded.model,
+                generated_at  = excluded.generated_at,
+                status        = excluded.status
+            """,
+            payload,
+        )
 
 
 def get_finding_status_override(finding_id: str) -> dict[str, Any] | None:

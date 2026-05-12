@@ -58,7 +58,23 @@ export default function FindingsPage() {
             >
               <SeverityBadge severity={f.severity} className="self-center" />
               <div className="self-center text-xs font-semibold text-teal-600">{f.id}</div>
-              <div className="self-center text-sm font-medium text-slate-900">{f.title}</div>
+              <div className="flex items-center gap-2 self-center text-sm font-medium text-slate-900">
+                <span className="truncate">{f.title}</span>
+                {f.doc_agent_status === "in_progress" && (
+                  <span className="inline-flex items-center gap-1 rounded bg-teal-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-teal-700">
+                    <span className="relative flex h-1.5 w-1.5">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-500 opacity-75" />
+                      <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-teal-500" />
+                    </span>
+                    Writing…
+                  </span>
+                )}
+                {f.doc_agent_status === "failed" && (
+                  <span className="rounded bg-red-50 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide text-red-700">
+                    Doc-agent failed
+                  </span>
+                )}
+              </div>
               <div className="self-center text-xs text-slate-600">
                 {f.category} / {f.subcategory}
               </div>

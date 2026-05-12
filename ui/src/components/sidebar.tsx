@@ -14,12 +14,13 @@ import {
   LogOut,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFindings } from "@/hooks/use-runs";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/run", label: "Ad Hoc Run", icon: Play },
   { href: "/coverage", label: "Coverage", icon: Grid3x3 },
-  { href: "/findings", label: "Findings", icon: Bug, badge: 3 },
+  { href: "/findings", label: "Findings", icon: Bug, badged: true },
   { href: "/orchestrator", label: "Orchestrator", icon: Settings },
   { href: "/runs", label: "Run History", icon: ScrollText },
   { href: "/dashboard/exec", label: "Executive View", icon: BarChart3 },
@@ -28,6 +29,21 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
+  const { data: findingsData } = useFindings();
+
+  // Sidebar badge: count of findings that are open or in-progress.
+  // Documentation-Agent-in-progress AUTO-* entries are status='open'
+  // already, so they naturally tick the counter up while Sonnet is
+  // generating their writeup. The dot-pulse below makes that state
+  // extra-visible so the demo viewer can tell "something new just
+  // landed."
+  const findings = findingsData?.findings ?? [];
+  const openCount = findings.filter(
+    (f) => f.status === "open" || f.status === "in_progress",
+  ).length;
+  const anyWriting = findings.some(
+    (f) => f.doc_agent_status === "in_progress",
+  );
 
   const logout = async () => {
     await fetch("/api/logout", { method: "POST" }).catch(() => {});
@@ -54,6 +70,7 @@ export function Sidebar() {
             item.href === "/"
               ? pathname === "/"
               : pathname.startsWith(item.href);
+          const showBadge = "badged" in item && item.badged && openCount > 0;
           return (
             <Link
               key={item.href}
@@ -67,11 +84,17 @@ export function Sidebar() {
             >
               <Icon className="h-4 w-4" />
               <span className="flex-1">{item.label}</span>
-              {"badge" in item && item.badge ? (
-                <span className="inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
-                  {item.badge}
+              {showBadge && (
+                <span className="relative inline-flex h-5 min-w-[20px] items-center justify-center rounded-full bg-red-500 px-1.5 text-[10px] font-bold text-white">
+                  {openCount}
+                  {anyWriting && (
+                    <span className="absolute -right-0.5 -top-0.5 flex h-2 w-2">
+                      <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal-400 opacity-75" />
+                      <span className="relative inline-flex h-2 w-2 rounded-full bg-teal-400" />
+                    </span>
+                  )}
                 </span>
-              ) : null}
+              )}
             </Link>
           );
         })}

@@ -138,16 +138,17 @@ _CATEGORY_SEVERITY: dict[str, str] = {
 def _exploit_findings_from_db() -> list[dict[str, Any]]:
     """Surface every distinct seed_id with verdict='pass' as a finding.
 
-    Acts as the immediate-visibility fallback for the Documentation
-    Agent path (ARCHITECTURE §1.3) — when the Judges confirm an
-    exploit, the corresponding attempt row gets summarised here as a
-    AUTO-<seed_id> finding entry. Hand-authored VULN-NNNN.md files
-    take precedence (matched by attack_id), so the polished version
-    shadows the auto entry once it's been written.
+    Two body sources, prefer-most-polished:
+      1. Documentation Agent output (Sonnet-generated; persisted in
+         documentation_agent_outputs by service/runner.py at end of
+         each campaign). Includes a real title, severity assessment,
+         and a full VULN-NNNN-shape writeup.
+      2. Fallback stub when the Doc Agent hasn't written one yet —
+         renders the raw response_text so the reviewer can see the
+         evidence immediately.
 
-    Body content comes from the most recent passing attempt's
-    response_text — gives the reviewer the exact evidence the Judges
-    flagged, without waiting on the markdown writer.
+    Hand-authored VULN-NNNN.md files take precedence over both
+    (matched by attack_id by the caller).
     """
     with db.get_conn() as conn:
         rows = conn.execute(
@@ -164,8 +165,10 @@ def _exploit_findings_from_db() -> list[dict[str, Any]]:
             GROUP BY seed_id, category, subcategory
             """,
         ).fetchall()
+    doc_outputs = db.list_doc_agent_outputs()
     out: list[dict[str, Any]] = []
     for r in rows:
+        seed_id = r["seed_id"]
         # Fetch the most-recent passing attempt's run_id + response_text
         with db.get_conn() as conn:
             latest = conn.execute(
@@ -176,39 +179,75 @@ def _exploit_findings_from_db() -> list[dict[str, Any]]:
                 ORDER BY started_at DESC
                 LIMIT 1
                 """,
-                (r["seed_id"],),
+                (seed_id,),
             ).fetchone()
         resp_text = (latest["response_text"] if latest else "") or ""
-        body = (
-            f"# AUTO — Confirmed exploit on seed `{r['seed_id']}`\n\n"
+
+        doc = doc_outputs.get(seed_id)
+        doc_status = (doc or {}).get("status", "absent")  # absent / in_progress / completed / failed
+
+        stub_body = (
+            f"# AUTO — Confirmed exploit on seed `{seed_id}`\n\n"
             f"**Category:** {r['category']} / {r['subcategory']}  \n"
             f"**First seen:** {r['first_seen']}  \n"
             f"**Last seen:** {r['last_seen']}  \n"
             f"**Confirmations:** {r['hit_count']} attempt(s) "
             f"verdicted `pass` by the dual-Judge.  \n\n"
             f"## Target response (most recent passing attempt)\n\n"
-            f"```\n{resp_text[:4000]}\n```\n\n"
-            f"_This is an auto-generated finding from the attempts table. "
-            f"A hand-authored `VULN-NNNN.md` will supersede this entry once "
-            f"the Documentation Agent promotes it (currently a manual step)._\n"
+            f"```\n{resp_text[:4000]}\n```\n"
         )
+
+        if doc_status == "completed":
+            title = doc["title"]
+            severity = doc["severity"]
+            body = doc["body_markdown"]
+            repro = f"Documented by Sonnet · {r['hit_count']} confirming attempt(s)"
+        elif doc_status == "in_progress":
+            title = f"Auto: exploit confirmed on {seed_id} (writing…)"
+            severity = _CATEGORY_SEVERITY.get(r["category"], "high")
+            body = (
+                "> 🔄 **Documentation Agent (Claude Sonnet 4.6) is writing "
+                "this report.** The polished version will replace this stub "
+                "as soon as the call returns. Refresh in ~30s.\n\n"
+                + stub_body
+            )
+            repro = "Documentation Agent in progress; raw evidence below"
+        elif doc_status == "failed":
+            title = doc["title"]
+            severity = doc["severity"]
+            body = doc["body_markdown"]
+            repro = "Documentation Agent failed — see body for details"
+        else:
+            title = f"Auto: exploit confirmed on {seed_id}"
+            severity = _CATEGORY_SEVERITY.get(r["category"], "high")
+            body = (
+                stub_body
+                + "\n_Documentation Agent has not run for this attack yet. "
+                "This entry will be replaced with a polished writeup at the "
+                "end of the next campaign that re-confirms it._\n"
+            )
+            repro = (
+                f"Confirmed exploit on {r['hit_count']} attempt(s); "
+                f"see {r['category']}/{r['subcategory']} seed."
+            )
+
         out.append({
-            "id": f"AUTO-{r['seed_id']}",
-            "title": f"Auto: exploit confirmed on {r['seed_id']}",
-            "severity": _CATEGORY_SEVERITY.get(r["category"], "high"),
+            "id": f"AUTO-{seed_id}",
+            "title": title,
+            "severity": severity,
             "status": "open",
             "category": r["category"],
             "subcategory": r["subcategory"],
             "discovered": r["first_seen"],
             "target": "",
-            "attack_id": r["seed_id"],
+            "attack_id": seed_id,
             "campaign_id": latest["run_id"] if latest else "",
             "threat_model_ref": "",
-            "repro_summary": (
-                f"Confirmed exploit on {r['hit_count']} attempt(s); "
-                f"see {r['category']}/{r['subcategory']} seed."
-            ),
+            "repro_summary": repro,
             "body_markdown": body,
+            # New: surface the Doc Agent lifecycle so the UI can render
+            # a pill/spinner. "absent" means no row in the table yet.
+            "doc_agent_status": doc_status,
         })
     return out
 

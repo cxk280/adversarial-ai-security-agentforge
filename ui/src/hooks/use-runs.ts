@@ -49,7 +49,11 @@ export function useFindings() {
   return useQuery({
     queryKey: ["findings"],
     queryFn: () => listFindings(),
-    staleTime: 30_000,
+    // Refresh frequently enough that newly-confirmed exploits + the
+    // Documentation-Agent-in-progress badge update promptly on the
+    // sidebar and findings page without manual reload.
+    refetchInterval: 10_000,
+    staleTime: 5_000,
   });
 }
 

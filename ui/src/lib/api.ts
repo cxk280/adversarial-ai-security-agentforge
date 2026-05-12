@@ -145,6 +145,9 @@ export interface FindingSummary {
   discovered: string;
   attack_id?: string;
   repro_summary?: string;
+  /** Documentation Agent lifecycle for AUTO-* findings. Hand-authored
+   *  VULN-NNNN findings don't set this (always undefined). */
+  doc_agent_status?: "absent" | "in_progress" | "completed" | "failed";
 }
 
 export interface FindingDetail extends FindingSummary {

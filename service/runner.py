@@ -26,6 +26,11 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from agents.documentation.sonnet_writer import (
+    DocAgentError,
+    DocumentationAgent,
+    ExploitContext,
+)
 from agents.red_team.escalation import CampaignState
 from agents.red_team.seed_dispatcher import Attack, SeedDispatcher
 from harness import CoPilotExecutor, new_session_id, run_assertions
@@ -300,6 +305,154 @@ async def execute_run(
             "gate_json": json.dumps({"verdict": gate_verdict, "reasons": gate_reasons}),
         },
     )
+
+    # Documentation Agent — run after the campaign settles, over any
+    # exploits we just confirmed that don't already have a writeup.
+    # Failures degrade to no-op so the campaign result is unaffected.
+    await _run_documentation_agent(
+        run_id=run_id,
+        target_url=target_url,
+        capped=5,
+    )
+
+
+async def _run_documentation_agent(
+    *, run_id: str, target_url: str, capped: int
+) -> None:
+    """End-of-campaign step: ask Sonnet to write a polished
+    VULN-NNNN-shape markdown for every NEW exploit this campaign
+    found. Cap-bounded per campaign (default 5) to keep the per-run
+    cost predictable. Skips any attack_id that already has a writeup
+    (idempotent across re-runs of the same seeds)."""
+    if not os.getenv("ANTHROPIC_API_KEY"):
+        return  # Doc Agent disabled when key is missing — quiet no-op
+
+    # Collect unique attack_ids confirmed as exploits in this campaign.
+    attempts = db.list_attempts(run_id)
+    confirmed: dict[str, dict[str, Any]] = {}
+    for a in attempts:
+        if a.get("verdict") != "pass":
+            continue
+        sid = a["seed_id"]
+        if sid in confirmed:
+            continue
+        confirmed[sid] = a
+    if not confirmed:
+        return
+
+    # Skip anything already documented.
+    existing_outputs = db.list_doc_agent_outputs()
+    new_attack_ids = [sid for sid in confirmed if sid not in existing_outputs]
+    if not new_attack_ids:
+        return
+
+    try:
+        agent = DocumentationAgent()
+    except DocAgentError as exc:
+        print(f"[doc-agent] init failed: {exc}")
+        return
+
+    # Mark every new attack_id as "in_progress" upfront so the UI can
+    # render a "writing…" indicator immediately, before the first
+    # Sonnet call returns. Capped so a campaign with many exploits
+    # doesn't burn unbounded Sonnet spend.
+    targets = new_attack_ids[:capped]
+    for sid in targets:
+        att = confirmed[sid]
+        db.upsert_doc_agent_output({
+            "attack_id":     sid,
+            "title":         f"Documentation Agent writing… ({sid})",
+            "severity":      "high",  # placeholder until real assessment lands
+            "body_markdown": "",
+            "campaign_id":   run_id,
+            "model":         DocumentationAgent.model_name,
+            "generated_at":  now_iso(),
+            "status":        "in_progress",
+        })
+
+    for sid in targets:
+        att = confirmed[sid]
+        ctx = ExploitContext(
+            attack_id=sid,
+            category=att.get("category", ""),
+            subcategory=att.get("subcategory", ""),
+            target_url=target_url,
+            campaign_id=run_id,
+            discovered=att.get("started_at", now_iso()),
+            attack_payload=_seed_payload_for(sid) or "(payload not recovered)",
+            response_text=att.get("response_text", ""),
+        )
+        try:
+            # The Anthropic SDK call is blocking — run in a thread so
+            # we don't pin the event loop.
+            body = await asyncio.to_thread(agent.write, ctx)
+        except DocAgentError as exc:
+            print(f"[doc-agent] write({sid}) failed: {exc}")
+            db.upsert_doc_agent_output({
+                "attack_id":     sid,
+                "title":         f"Documentation Agent failed ({sid})",
+                "severity":      "high",
+                "body_markdown": (
+                    f"_The Documentation Agent (Claude Sonnet 4.6) failed to "
+                    f"generate a writeup for this exploit. Error: {exc}\n\n"
+                    f"The exploit itself is still confirmed; the failure is "
+                    f"in the doc-generation step. Re-trigger by re-running "
+                    f"the campaign that found seed `{sid}`._\n"
+                ),
+                "campaign_id":   run_id,
+                "model":         DocumentationAgent.model_name,
+                "generated_at":  now_iso(),
+                "status":        "failed",
+            })
+            continue
+        # Extract a one-line title from the first H1.
+        title = _extract_title(body) or f"Exploit on {sid}"
+        severity = _extract_severity(body) or "high"
+        db.upsert_doc_agent_output({
+            "attack_id":     sid,
+            "title":         title,
+            "severity":      severity,
+            "body_markdown": body,
+            "campaign_id":   run_id,
+            "model":         agent.model_name,
+            "generated_at":  now_iso(),
+            "status":        "completed",
+        })
+        print(f"[doc-agent] wrote AUTO-{sid} (severity={severity})")
+
+
+@lru_cache(maxsize=512)
+def _seed_payload_for(seed_id: str) -> str | None:
+    """Best-effort lookup of the raw attack payload that corresponds
+    to a seed_id. Cheap because seeds are static on disk; cached at
+    process scope."""
+    try:
+        dispatcher = SeedDispatcher(SEEDS_ROOT)
+        for atk in dispatcher.load_all():
+            if atk.id == seed_id:
+                return atk.payload
+    except Exception:
+        return None
+    return None
+
+
+def _extract_title(markdown: str) -> str | None:
+    """Pull the `# AUTO-xxx — Title` line's title part."""
+    for line in markdown.splitlines():
+        if line.startswith("# "):
+            # `# AUTO-xxx — Title here`  →  `Title here`
+            if "—" in line:
+                return line.split("—", 1)[1].strip()
+            return line[2:].strip()
+    return None
+
+
+def _extract_severity(markdown: str) -> str | None:
+    """Pull the severity tier (critical/high/medium/low) from the
+    metadata table's Severity row."""
+    import re
+    m = re.search(r"\*\*Severity\*\*[^|]*\|\s*\*\*(Critical|High|Medium|Low)\*\*", markdown)
+    return m.group(1).lower() if m else None
 
 
 async def _run_one(atk: Attack, executor, judge, run_id: str, run_tr=None):
