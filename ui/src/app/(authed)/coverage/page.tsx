@@ -39,11 +39,13 @@ const TAXON: TaxonRow[] = [
 
 type RowState = "untested" | "red" | "orange" | "green";
 
-const STATE_STYLE: Record<RowState, string> = {
-  untested: "bg-amber-50/80 text-slate-700",
-  red:      "bg-red-500 text-white",
-  orange:   "bg-orange-500 text-white",
-  green:    "bg-green-200 text-slate-900",
+/** Colored status dot for the subcategory column. Indicator only —
+ *  not a button. */
+const DOT_STYLE: Record<RowState, string> = {
+  untested: "bg-amber-200",
+  red:      "bg-red-500",
+  orange:   "bg-orange-500",
+  green:    "bg-green-500",
 };
 
 /** Normalize: agent-side seeds tag attempts as category/subcategory.
@@ -143,11 +145,17 @@ export default function CoveragePage() {
             >
               <div className="self-center text-xs font-bold text-slate-500">{r.rank}</div>
               <div className="self-center text-xs text-slate-600">{prettySnake(r.cat)}</div>
-              <div className="self-center">
-                <span className={cn(
-                  "inline-block rounded-md px-2.5 py-1.5 text-xs font-semibold",
-                  STATE_STYLE[r.state],
-                )}>{r.sub}</span>
+              <div className="flex items-center gap-2 self-center">
+                <span
+                  className={cn(
+                    "h-2 w-2 shrink-0 rounded-full",
+                    DOT_STYLE[r.state],
+                  )}
+                  aria-label={`status: ${r.state}`}
+                />
+                <span className="truncate text-xs font-medium text-slate-900">
+                  {r.sub}
+                </span>
               </div>
               <div className={cn(
                 "self-center text-xs font-bold",
