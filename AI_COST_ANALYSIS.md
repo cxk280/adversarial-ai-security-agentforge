@@ -28,18 +28,21 @@ The dual-Judge design (Primary Haiku + Secondary GPT-4.1-mini + Sonnet arbitrato
 
 ---
 
-## Actual dev spend (sprint to date, 2026-05-11)
+## Actual dev spend (sprint to date, 2026-05-12)
 
-Pulled from the run records in `evals/results/`. The platform's prototype phase ran 5 campaigns × 57 cases against the deployed dev target (Stage 3 hard-gate plus iteration on assertion logic).
+Pulled from the run records in `service/db.py` (SQLite `regression_runs` table) and `evals/results/`.
 
-| Item | Quantity | Cost |
-|---|---:|---:|
-| Stage-3 prototype runs (5 × ~57 cycles each) | ~285 cycles | The prototype phase had **no LLM Judge** wired in (deterministic Judge only) and **no LLM Red Team mutation** wired in (seed dispatcher only). Effective LLM cost from our side: **$0.00** |
-| Target's own Anthropic spend (not our bill, but worth surfacing) | ~285 calls × ~$0.018 = ~$5.13 | (the target's bill, not ours) |
-| Mutator wiring development (no LLM hits, unit-tested with stubs) | 38 unit tests | $0.00 |
-| **Total spend by the adversarial platform itself (to 2026-05-11)** | | **$0.00** |
+| Phase | Runs | Cycles | Per-cycle | Total |
+|---|---:|---:|---:|---:|
+| Stage-3 prototype (2026-04-28 → 2026-04-30) — no LLM Judge, deterministic assertions only, seed dispatcher only | 5 | ~285 | $0.000 | **$0.00** |
+| W3 sprint — LLM Judge on, dual-Judge wired, deterministic assertions still in front | ~6 | ~180 | ~$0.002 | **~$0.40** |
+| Mutator + observability unit tests (stubs only, no LLM hits) | — | — | — | $0.00 |
+| Target's own Anthropic spend (not our bill, but worth surfacing) | — | ~465 calls × ~$0.018 | — | ~$8.37 *(target's bill, not ours)* |
+| **Total spend by the adversarial platform itself (to 2026-05-12 noon)** | | | | **~$0.40** |
 
-Note: when we wire the real Judge (Haiku) in the next step and start running mutation campaigns (RunPod + DeepSeek), real LLM spend begins. Budget cap stays at `$5/day per env, $20/day global` per `ARCHITECTURE.md §3.3`.
+The **$0.002/cycle empirical** number is materially *under* the modeled $0.014/cycle in the table above. The gap is the dual-Judge fast-path: when Primary Haiku and Secondary GPT-4.1-mini agree on `fail` (which is the common case — the target refuses ~90% of seeds), the Arbitrator never fires and the Documentation Agent never runs. The $0.014 model assumes Arbitrator fires on 12% of cycles and Docs fires on 5%; in real campaigns against this target both rates are closer to 2-3% because the target's refusals are unambiguous. The $0.014 model stays in the table as the conservative ceiling.
+
+Budget cap stays at `$5/day per env, $20/day global` per `ARCHITECTURE.md §3.3` — we are not close.
 
 ---
 
