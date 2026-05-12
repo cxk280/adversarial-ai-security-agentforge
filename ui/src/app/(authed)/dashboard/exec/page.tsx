@@ -1,11 +1,12 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { TopBar } from "@/components/top-bar";
 import { KpiCard } from "@/components/kpi-card";
 import { cn } from "@/lib/utils";
 import { useFindings, useRuns } from "@/hooks/use-runs";
 import { usd } from "@/lib/format";
+import { downloadComplianceReport } from "@/lib/api";
 
 interface KpiTone { tone: "green" | "red" | "orange"; }
 
@@ -167,9 +168,7 @@ export default function ExecPage() {
               <span className="font-semibold text-teal-600">Last 7 days</span>
               <span className="text-slate-400">▾</span>
             </button>
-            <button className="rounded-lg bg-teal-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-teal-700">
-              ↓ Generate compliance report
-            </button>
+            <GenerateReportButton />
           </div>
         </div>
 
@@ -227,6 +226,36 @@ export default function ExecPage() {
           </section>
         </div>
       </div>
+    </div>
+  );
+}
+
+function GenerateReportButton() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={async () => {
+          setError(null);
+          setBusy(true);
+          try {
+            await downloadComplianceReport();
+          } catch (e) {
+            setError(e instanceof Error ? e.message : "Download failed");
+          } finally {
+            setBusy(false);
+          }
+        }}
+        disabled={busy}
+        className="rounded-lg bg-teal-600 px-3.5 py-2 text-xs font-semibold text-white hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-60"
+      >
+        {busy ? "Generating…" : "↓ Generate compliance report"}
+      </button>
+      {error && (
+        <p className="text-[10px] font-medium text-red-600">{error}</p>
+      )}
     </div>
   );
 }

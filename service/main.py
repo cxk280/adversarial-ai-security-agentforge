@@ -22,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from service import db
-from service.api import audit, findings, runs
+from service.api import audit, findings, report, runs
 
 
 @asynccontextmanager
@@ -63,6 +63,7 @@ app.add_middleware(
 app.include_router(runs.router)
 app.include_router(audit.router)
 app.include_router(findings.router)
+app.include_router(report.router)
 
 
 # ─── Public health + version (no auth) ─────────────────────────────

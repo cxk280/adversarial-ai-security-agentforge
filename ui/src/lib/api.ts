@@ -172,6 +172,37 @@ export function updateFindingStatus(
 }
 
 
+// ─── Compliance report ────────────────────────────────────────────
+
+/** Downloads the multi-section CSV report from /report.csv and
+ *  triggers a browser file save. Returns the filename used. */
+export async function downloadComplianceReport(): Promise<string> {
+  const headers = new Headers();
+  if (API_TOKEN) headers.set("Authorization", `Bearer ${API_TOKEN}`);
+  const resp = await fetch(`${API_BASE}/report.csv`, { headers });
+  if (!resp.ok) {
+    throw new ApiError(resp.status, await resp.text());
+  }
+  // Try to honor the server-set Content-Disposition filename; fall
+  // back to a sensible default if the header isn't readable (some
+  // CORS configs hide it from JS).
+  const cd = resp.headers.get("Content-Disposition") || "";
+  const match = cd.match(/filename="?([^";]+)"?/i);
+  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const filename = match?.[1] || `adversary-compliance-report-${ts}.csv`;
+  const blob = await resp.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return filename;
+}
+
+
 // ─── Attempts (per-attack rows within a run) ────────────────────
 
 export interface Attempt {
