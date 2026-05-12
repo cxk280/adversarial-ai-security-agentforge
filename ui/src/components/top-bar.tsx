@@ -1,6 +1,3 @@
-import Link from "next/link";
-import { Play } from "lucide-react";
-
 interface Props {
   crumb: string;
   /** Display label for the currently-selected target. */
@@ -18,13 +15,6 @@ export function TopBar({ crumb, target }: Props) {
           <span className="font-semibold text-slate-900">{target}</span>
           <span className="text-slate-400">▾</span>
         </div>
-        <Link
-          href="/run"
-          className="flex items-center gap-2 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700"
-        >
-          <Play className="h-3.5 w-3.5" />
-          Run campaign
-        </Link>
       </div>
     </header>
   );
