@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { Status } from "@/lib/mock";
+import type { Status } from "@/lib/types";
 
 const STYLE: Record<Status, string> = {
   open: "bg-red-100 text-red-700",

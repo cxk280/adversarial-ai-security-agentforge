@@ -1,5 +1,5 @@
 import { cn } from "@/lib/utils";
-import type { Severity } from "@/lib/mock";
+import type { Severity } from "@/lib/types";
 
 interface Props {
   severity: Severity;

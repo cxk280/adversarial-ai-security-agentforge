@@ -1,9 +1,9 @@
 import Link from "next/link";
 import { SeverityBadge } from "@/components/severity-badge";
-import type { Finding } from "@/lib/mock";
+import type { FindingSummary } from "@/lib/api";
 
 interface Props {
-  finding: Finding;
+  finding: FindingSummary;
   when: string; // pre-formatted relative time
 }
 
