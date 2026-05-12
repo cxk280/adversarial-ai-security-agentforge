@@ -52,7 +52,7 @@ app.add_middleware(
         r"|^http://localhost:\d+$"
     ),
     allow_credentials=True,
-    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Authorization", "Content-Type"],
     expose_headers=["X-Request-Id"],
     max_age=86400,
