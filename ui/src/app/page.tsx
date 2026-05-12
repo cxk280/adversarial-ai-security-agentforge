@@ -53,9 +53,12 @@ export default function DashboardPage() {
         <section className="rounded-xl border border-slate-200 bg-white">
           <header className="flex items-center justify-between px-5 py-4">
             <h3 className="font-semibold text-slate-900">Coverage at a glance</h3>
-            <a href="/coverage" className="text-xs font-medium text-teal-600 hover:underline">
-              Open full matrix →
-            </a>
+            <div className="flex items-center gap-4">
+              <CoverageLegend />
+              <a href="/coverage" className="text-xs font-medium text-teal-600 hover:underline">
+                Open full matrix →
+              </a>
+            </div>
           </header>
           <div className="border-t border-amber-50 px-5 py-4">
             <CoverageCompact />
@@ -66,42 +69,102 @@ export default function DashboardPage() {
   );
 }
 
+const SUBCATEGORY_LABEL: Record<string, string> = {
+  indirect:                          "Indirect",
+  direct:                            "Direct",
+  multi_turn:                        "Multi-turn",
+  cross_patient_leakage:             "Cross-patient",
+  authorization_bypass:              "Authz bypass",
+  phi_leakage:                       "PHI leakage",
+  persona_hijack_clinical_authority: "Persona hijack",
+  privilege_escalation:              "Priv escalation",
+  history_manipulation:              "History manip",
+  context_poisoning:                 "Context poison",
+  parameter_tampering:               "Param tamper",
+  unintended_invocation:             "Recursive calls",
+  token_exhaustion:                  "Token exhaust",
+  cost_amplification:                "Cost amp",
+};
+
+const CATEGORY_LABEL: Record<string, string> = {
+  prompt_injection:           "Prompt Injection",
+  data_exfiltration:          "Data Exfiltration",
+  identity_role_exploitation: "Identity / Role",
+  state_corruption:           "State Corruption",
+  tool_misuse:                "Tool Misuse",
+  denial_of_service:          "Denial of Service",
+};
+
+const COVERAGE_ORDER = [
+  "prompt_injection",
+  "data_exfiltration",
+  "identity_role_exploitation",
+  "state_corruption",
+  "tool_misuse",
+  "denial_of_service",
+];
+
 function CoverageCompact() {
   const byCat = new Map<string, typeof COVERAGE>();
   for (const c of COVERAGE) {
     if (!byCat.has(c.category)) byCat.set(c.category, []);
     byCat.get(c.category)!.push(c);
   }
+  const SLOTS = 3;
   return (
     <div className="space-y-2">
-      {[...byCat.entries()].map(([cat, cells]) => (
-        <div key={cat} className="flex items-center gap-2">
-          <div className="w-44 shrink-0 text-xs font-medium text-slate-900">
-            {prettyCat(cat)}
-          </div>
-          {cells.map((c) => (
-            <div
-              key={c.subcategory}
-              className={
-                "flex-1 truncate rounded-md px-3 py-2 text-[11px] font-medium " +
-                cellColor(c.cases, c.passRate)
-              }
-              title={c.subcategory}
-            >
-              {c.subcategory}
+      {COVERAGE_ORDER.map((cat) => {
+        const cells = byCat.get(cat) ?? [];
+        const padded = [...cells, ...Array(Math.max(0, SLOTS - cells.length)).fill(null)];
+        return (
+          <div
+            key={cat}
+            className="grid grid-cols-[176px_repeat(3,minmax(0,1fr))] items-center gap-2"
+          >
+            <div className="text-xs font-medium text-slate-900">
+              {CATEGORY_LABEL[cat] ?? cat}
             </div>
-          ))}
-        </div>
-      ))}
+            {padded.slice(0, SLOTS).map((c, idx) =>
+              c ? (
+                <div
+                  key={c.subcategory}
+                  className={
+                    "truncate rounded-md px-3 py-2 text-[11px] font-medium " +
+                    cellColor(c.cases, c.passRate)
+                  }
+                  title={`${c.subcategory} · sev ${c.severityWeight}`}
+                >
+                  {SUBCATEGORY_LABEL[c.subcategory] ?? c.subcategory}
+                </div>
+              ) : (
+                <div key={`empty-${idx}`} />
+              ),
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
 
-function prettyCat(c: string): string {
-  return c
-    .split("_")
-    .map((s) => s.charAt(0).toUpperCase() + s.slice(1))
-    .join(" ");
+function CoverageLegend() {
+  const items = [
+    { color: "bg-red-500",    label: "≥1 exploit" },
+    { color: "bg-orange-500", label: "partial" },
+    { color: "bg-yellow-200", label: "tested" },
+    { color: "bg-green-200",  label: "clean" },
+    { color: "bg-amber-50",   label: "untested" },
+  ];
+  return (
+    <div className="flex items-center gap-3 text-[10px] text-slate-600">
+      {items.map((i) => (
+        <span key={i.label} className="flex items-center gap-1.5">
+          <span className={`h-2.5 w-2.5 rounded ${i.color}`} />
+          {i.label}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function cellColor(cases: number, passRate: number): string {

@@ -117,17 +117,17 @@ function TrendChart() {
 
   return (
     <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      {[0.1, 0.3, 0.5, 0.7, 0.9].map((g) => (
-        <g key={g}>
+      {[0.9, 0.7, 0.5, 0.3, 0.1].map((v) => (
+        <g key={v}>
           <line
-            x1={PADX} y1={yScale(1 - g)} x2={W - PADX} y2={yScale(1 - g)}
-            stroke={g === 0.5 ? "#eeebE3" : "#e2e5eb"}
+            x1={PADX} y1={yScale(v)} x2={W - PADX} y2={yScale(v)}
+            stroke={v === 0.5 ? "#eeebE3" : "#e2e5eb"}
             strokeWidth={1}
           />
           <text
-            x={PADX - 8} y={yScale(1 - g) + 3}
+            x={PADX - 8} y={yScale(v) + 3}
             fontSize="10" fill="#8a91a1" textAnchor="end"
-          >{Math.round(g * 100)}%</text>
+          >{Math.round(v * 100)}%</text>
         </g>
       ))}
       <path d={path} stroke="#008c8c" strokeWidth={2} fill="none" />
