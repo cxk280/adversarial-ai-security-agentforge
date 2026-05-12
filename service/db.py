@@ -163,19 +163,33 @@ def init_db() -> None:
         except sqlite3.OperationalError:
             pass
 
-        # One-shot migration: clean slate for documentation_agent_outputs.
-        # The earlier prompt rendered "AUTO-<attack_id>" verbatim inside
-        # the markdown body; those bodies are still in old rows even
-        # after the id-allocator switched to VULN-NNNN. Cheaper to
-        # delete and let the next campaign regenerate with the new
-        # prompt than to do a string-substitution migration over
-        # generated markdown. Idempotent via an audit_log marker row.
-        marker_kind = "migration:reset_doc_agent_outputs_v1"
+        # One-shot migration: clean slate for the DB-allocated finding
+        # entries. The id-allocator now produces VULN-NNNN, but
+        # pre-existing data still leaks through two layers:
+        #   1. documentation_agent_outputs rows have markdown bodies
+        #      from an earlier prompt that baked "AUTO-<attack_id>"
+        #      into the title verbatim.
+        #   2. attempts rows with verdict='pass' regenerate AUTO-
+        #      finding entries on every /findings GET (via the
+        #      allocator), even after we've wiped doc_agent_outputs.
+        # Both layers need clearing for the wipe to actually stick.
+        #
+        # We delete the passing attempts AND the doc-agent rows in
+        # one transaction, marker-gated so it runs exactly once.
+        # The non-passing attempts (held/partial/inconclusive) stay
+        # — those are the evidence that the target's defenses worked,
+        # and they're what the Coverage matrix's "tested but held"
+        # cells depend on. Campaign-level totals in regression_runs.
+        # totals_json are stored as a snapshot at run-completion, so
+        # the Run History counts stay intact even though individual
+        # passing attempts are gone.
+        marker_kind = "migration:reset_doc_agent_outputs_v2"
         already_ran = conn.execute(
             "SELECT 1 FROM audit_log WHERE kind = ? LIMIT 1", (marker_kind,)
         ).fetchone()
         if not already_ran:
             conn.execute("DELETE FROM documentation_agent_outputs")
+            conn.execute("DELETE FROM attempts WHERE verdict = 'pass'")
             # Any user-set status overrides on DB-allocated VULN-NNNN
             # findings are also dropped — the underlying findings are
             # gone, the overrides would otherwise dangle.
