@@ -124,3 +124,33 @@ export function getVersion(): Promise<VersionInfo> {
 export function getHealth(): Promise<{ status: string }> {
   return request(`/health`);
 }
+
+
+// ─── Findings ─────────────────────────────────────────────────────
+
+export interface FindingSummary {
+  id: string;
+  title: string;
+  severity: "critical" | "high" | "medium" | "low";
+  status: "open" | "in_progress" | "resolved" | "draft";
+  category: string;
+  subcategory: string;
+  discovered: string;
+  attack_id?: string;
+  repro_summary?: string;
+}
+
+export interface FindingDetail extends FindingSummary {
+  body_markdown: string;
+  target?: string;
+  campaign_id?: string;
+  threat_model_ref?: string;
+}
+
+export function listFindings(): Promise<{ findings: FindingSummary[]; count: number }> {
+  return request("/findings");
+}
+
+export function getFinding(id: string): Promise<FindingDetail> {
+  return request(`/findings/${encodeURIComponent(id)}`);
+}

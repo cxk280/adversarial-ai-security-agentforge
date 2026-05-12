@@ -1,9 +1,13 @@
+"use client";
+
 import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { SeverityBadge } from "@/components/severity-badge";
 import { StatusPill } from "@/components/status-pill";
-import { FINDINGS } from "@/lib/mock";
+import { FINDINGS as MOCK_FINDINGS } from "@/lib/mock";
 import { relativeTime } from "@/lib/format";
+import { useFindings } from "@/hooks/use-runs";
+import type { FindingSummary } from "@/lib/api";
 
 const FILTERS = [
   { label: "Severity", value: "All" },
@@ -13,21 +17,38 @@ const FILTERS = [
 ];
 
 export default function FindingsPage() {
-  const open = FINDINGS.filter((f) => f.status === "open").length;
-  const drafts = FINDINGS.filter((f) => f.status === "draft").length;
-  const resolved = FINDINGS.filter((f) => f.status === "resolved").length;
-  const in_prog = FINDINGS.filter((f) => f.status === "in_progress").length;
+  const { data, isLoading, error } = useFindings();
+
+  // Live findings from the API merged with the mock entries that don't exist
+  // on disk yet (e.g. VULN-0004 Draft, VULN-0005 Low) so the UI still shows
+  // the draft-queue scenario.
+  const live = data?.findings ?? [];
+  const liveIds = new Set(live.map((f) => f.id));
+  const mockExtras = MOCK_FINDINGS.filter((m) => !liveIds.has(m.id));
+  const findings: (FindingSummary | typeof MOCK_FINDINGS[number])[] = error
+    ? MOCK_FINDINGS
+    : [...live, ...mockExtras];
+
+  const open = findings.filter((f) => f.status === "open").length;
+  const drafts = findings.filter((f) => f.status === "draft").length;
+  const resolved = findings.filter((f) => f.status === "resolved").length;
+  const in_prog = findings.filter((f) => f.status === "in_progress").length;
 
   return (
     <div className="-mx-8 -my-6">
       <TopBar crumb="Findings" target="copilot-agent-dev" />
       <div className="space-y-5 px-8 py-6">
-        {/* Page header */}
         <div className="flex items-start justify-between">
           <div className="space-y-1">
             <h1 className="text-2xl font-bold text-slate-900">Findings</h1>
             <p className="text-sm text-slate-600">
-              {open} open &nbsp;·&nbsp; {in_prog} in progress &nbsp;·&nbsp; {resolved} resolved &nbsp;·&nbsp; {drafts} draft awaiting approval
+              {isLoading ? (
+                "Loading from API…"
+              ) : (
+                <>
+                  {open} open &nbsp;·&nbsp; {in_prog} in progress &nbsp;·&nbsp; {resolved} resolved &nbsp;·&nbsp; {drafts} draft awaiting approval
+                </>
+              )}
             </p>
           </div>
           <button
@@ -38,7 +59,6 @@ export default function FindingsPage() {
           </button>
         </div>
 
-        {/* Filter bar */}
         <div className="flex items-center gap-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-3">
           <div className="flex flex-1 items-center gap-2 rounded-lg border border-slate-200 bg-amber-50/40 px-3 py-2">
             <span className="text-sm text-slate-400">⌕</span>
@@ -61,7 +81,6 @@ export default function FindingsPage() {
           ))}
         </div>
 
-        {/* Table card */}
         <section className="rounded-xl border border-slate-200 bg-white">
           <div className="grid grid-cols-[60px_1fr_minmax(0,3fr)_minmax(0,2fr)_120px_120px] gap-3 border-b border-amber-50 px-5 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
             <div>SEV</div>
@@ -71,7 +90,7 @@ export default function FindingsPage() {
             <div>STATUS</div>
             <div>DISCOVERED</div>
           </div>
-          {FINDINGS.map((f) => (
+          {findings.map((f) => (
             <Link
               key={f.id}
               href={`/findings/${f.id}`}
@@ -86,12 +105,13 @@ export default function FindingsPage() {
               <div className="self-center">
                 <StatusPill status={f.status} />
               </div>
-              <div className="self-center text-[11px] text-slate-500">{relativeTime(f.discovered)}</div>
+              <div className="self-center text-[11px] text-slate-500">
+                {f.discovered ? relativeTime(f.discovered) : "—"}
+              </div>
             </Link>
           ))}
         </section>
 
-        {/* Draft approval callout */}
         {drafts > 0 && (
           <div className="flex items-center gap-3 rounded-xl border border-orange-300 bg-amber-50/40 px-4 py-3.5">
             <span className="rounded-full bg-orange-500 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-white">
