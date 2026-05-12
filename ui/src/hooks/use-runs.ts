@@ -7,6 +7,7 @@ import {
   getVersion,
   listFindings,
   getFinding,
+  listAttempts,
   type RunSummary,
 } from "@/lib/api";
 
@@ -54,5 +55,14 @@ export function useFinding(id: string | undefined) {
     queryFn: () => getFinding(id!),
     enabled: !!id,
     staleTime: 30_000,
+  });
+}
+
+export function useAttempts(runId: string | undefined) {
+  return useQuery({
+    queryKey: ["attempts", runId],
+    queryFn: () => listAttempts(runId!),
+    enabled: !!runId,
+    refetchInterval: 5_000,
   });
 }

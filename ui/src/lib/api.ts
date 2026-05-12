@@ -154,3 +154,23 @@ export function listFindings(): Promise<{ findings: FindingSummary[]; count: num
 export function getFinding(id: string): Promise<FindingDetail> {
   return request(`/findings/${encodeURIComponent(id)}`);
 }
+
+
+// ─── Attempts (per-attack rows within a run) ────────────────────
+
+export interface Attempt {
+  attempt_id: string;
+  run_id: string;
+  seed_id: string;
+  category: string;
+  subcategory: string;
+  verdict: "pass" | "fail" | "partial" | "inconclusive";
+  response_text: string;
+  latency_ms: number;
+  spend_usd: number;
+  started_at: string;
+}
+
+export function listAttempts(runId: string): Promise<{ run_id: string; attempts: Attempt[]; count: number }> {
+  return request(`/regression-runs/${encodeURIComponent(runId)}/attempts`);
+}

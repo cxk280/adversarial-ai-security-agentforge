@@ -122,6 +122,19 @@ async def list_runs(
     return {"runs": rows, "count": len(rows)}
 
 
+@router.get("/regression-runs/{run_id}/attempts")
+async def get_run_attempts(
+    run_id: str,
+    _token: str = Depends(require_bearer),
+) -> dict:
+    """Per-attack rows for a run — what the Run Detail UI page renders."""
+    row = db.get_run(run_id)
+    if row is None:
+        raise HTTPException(404, f"Run {run_id!r} not found")
+    attempts = db.list_attempts(run_id)
+    return {"run_id": run_id, "attempts": attempts, "count": len(attempts)}
+
+
 @router.post("/regression-runs/{run_id}/cancel")
 async def cancel_run(
     run_id: str,

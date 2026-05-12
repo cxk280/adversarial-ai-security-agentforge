@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
@@ -110,9 +111,10 @@ export default function RunsHistoryPage() {
               .replace(/\.up\.railway\.app$/, "")
               .replace(/^copilot-agent-/, "");
             return (
-              <div
+              <Link
                 key={r.run_id}
-                className="grid grid-cols-[1.5fr_90px_90px_140px_70px_70px_70px_80px] gap-3 border-b border-amber-50 px-5 py-3 last:border-b-0 items-center"
+                href={`/runs/${r.run_id}`}
+                className="grid grid-cols-[1.5fr_90px_90px_140px_70px_70px_70px_80px] gap-3 border-b border-amber-50 px-5 py-3 last:border-b-0 items-center hover:bg-slate-50"
               >
                 <div className="font-mono text-xs font-semibold text-teal-600">{r.run_id}</div>
                 <div className="text-xs text-slate-500">{relativeTime(r.started_at)}</div>
@@ -148,7 +150,7 @@ export default function RunsHistoryPage() {
                     {r.state}
                   </span>
                 </div>
-              </div>
+              </Link>
             );
           })}
         </section>
