@@ -88,6 +88,10 @@ export interface SubmitRunRequest {
   baseline_target_sha?: string;
   max_seconds?: number;
   budget_usd?: number;
+  /** Optional seed-directory names. When set, overrides the suite_ref's
+   *  default category list — used by the Ad Hoc Run page so the user's
+   *  checkbox selection actually drives what runs. */
+  categories?: string[];
 }
 
 export interface SubmitRunResponse {

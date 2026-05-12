@@ -22,6 +22,12 @@ class RunSubmit(BaseModel):
     source_url: str | None = Field(default=None, max_length=512)
     max_seconds: int = Field(default=300, ge=10, le=1800)
     budget_usd: float = Field(default=0.50, ge=0.01, le=20.00)
+    # Optional override — when provided, the runner uses these seed
+    # directories instead of the suite_ref's default category list.
+    # Lets the dashboard launch tailored campaigns without minting a
+    # new suite. Must be a non-empty subset of the on-disk dirs in
+    # evals/seeds/.
+    categories: list[str] | None = Field(default=None, max_length=32)
 
     @field_validator("target_url")
     @classmethod

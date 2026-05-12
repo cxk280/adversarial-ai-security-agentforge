@@ -21,13 +21,27 @@ const TARGET_URL: Record<string, string> = {
   prod: "https://copilot-agent-production-41de.up.railway.app",
 };
 
+// id = seed directory under evals/seeds/. Sent to the backend on
+// Launch so the user's checkbox selection actually drives what runs.
+// Order is priority-ranked from THREAT_MODEL.md.
 const CATEGORIES = [
-  { id: "indirect",         name: "Indirect prompt injection",      seeds: 10, sev: 9,  priority: "TOP" },
-  { id: "cross_patient",    name: "Cross-patient data exfiltration", seeds: 20, sev: 10, priority: "TOP" },
-  { id: "direct",           name: "Direct prompt injection",         seeds: 12, sev: 6,  priority: null },
-  { id: "persona_hijack",   name: "Persona hijack — clinical authority", seeds: 15, sev: 10, priority: null },
-  { id: "crescendo",        name: "Multi-turn / crescendo injection",  seeds: 0, sev: 8,  priority: null },
-  { id: "history_manip",    name: "State corruption — history manipulation", seeds: 0, sev: 8, priority: null },
+  { id: "data_exfil_authorization_bypass",         name: "Data exfil — authorization bypass",       seeds: 3,  sev: 9,  priority: "TOP" },
+  { id: "data_exfil_cross_patient",                name: "Data exfil — cross-patient leakage",      seeds: 20, sev: 10, priority: "TOP" },
+  { id: "prompt_injection_indirect",               name: "Prompt injection — indirect",             seeds: 10, sev: 9,  priority: "TOP" },
+  { id: "prompt_injection_multi_turn",             name: "Prompt injection — multi-turn / crescendo", seeds: 3,  sev: 8,  priority: null },
+  { id: "state_corruption_history_manipulation",   name: "State corruption — history manipulation", seeds: 3,  sev: 8,  priority: null },
+  { id: "data_exfil_phi_leakage",                  name: "Data exfil — PHI leakage",                seeds: 3,  sev: 9,  priority: null },
+  { id: "identity_role_persona_hijack",            name: "Persona hijack — clinical authority",     seeds: 15, sev: 10, priority: null },
+  { id: "tool_misuse_parameter_tampering",         name: "Tool misuse — parameter tampering",       seeds: 3,  sev: 7,  priority: null },
+  { id: "identity_role_privilege_escalation",      name: "Identity — privilege escalation",         seeds: 3,  sev: 7,  priority: null },
+  { id: "state_corruption_context_poisoning",      name: "State corruption — context poisoning",    seeds: 3,  sev: 7,  priority: null },
+  { id: "identity_role_trust_boundary_violation",  name: "Identity — trust boundary violation",     seeds: 3,  sev: 8,  priority: null },
+  { id: "prompt_injection_direct",                 name: "Prompt injection — direct",               seeds: 12, sev: 6,  priority: null },
+  { id: "denial_of_service_token_exhaustion",      name: "DoS — token exhaustion",                  seeds: 3,  sev: 5,  priority: null },
+  { id: "denial_of_service_cost_amplification",    name: "DoS — cost amplification",                seeds: 3,  sev: 5,  priority: null },
+  { id: "tool_misuse_unintended_invocation",       name: "Tool misuse — unintended invocation",     seeds: 3,  sev: 5,  priority: null },
+  { id: "tool_misuse_recursive_tool_calls",        name: "Tool misuse — recursive tool calls",      seeds: 3,  sev: 5,  priority: null },
+  { id: "denial_of_service_infinite_loops",        name: "DoS — infinite loops",                    seeds: 3,  sev: 4,  priority: null },
 ];
 
 const MODES = [
@@ -39,11 +53,17 @@ const MODES = [
 export default function RunPage() {
   const [target, setTarget] = useState("dev");
   const [selected, setSelected] = useState<Set<string>>(
-    new Set(["indirect", "cross_patient", "direct", "persona_hijack"]),
+    new Set([
+      "data_exfil_authorization_bypass",
+      "data_exfil_cross_patient",
+      "prompt_injection_indirect",
+      "identity_role_persona_hijack",
+    ]),
   );
   const [mode, setMode] = useState("tap");
-  // activeRunId persists across navigations via sessionStorage so the
-  // verdict stream resumes when the user comes back to /run.
+  // Reset the default selection to the 4 top-priority categories from
+  // the new 17-category lineup.
+  // Note: keeping useState's initializer in sync with CATEGORIES order.
   const [activeRunId, setActiveRunId] = useActiveRunId();
   const [launchError, setLaunchError] = useState<string | null>(null);
   const [launching, setLaunching] = useState(false);
@@ -78,6 +98,7 @@ export default function RunPage() {
         source: "manual",
         max_seconds: estMin * 60 * 2,
         budget_usd: Math.max(0.25, Number(estUsd)),
+        categories: [...selected],
       });
       setActiveRunId(resp.run_id);
     } catch (e) {

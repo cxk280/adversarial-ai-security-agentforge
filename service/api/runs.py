@@ -55,7 +55,13 @@ async def submit_run(
         "gate_json": json.dumps({}),
     }
     db.insert_run(row)
-    background.add_task(execute_run, run_id, payload.target_url, payload.suite_ref)
+    background.add_task(
+        execute_run,
+        run_id,
+        payload.target_url,
+        payload.suite_ref,
+        payload.categories,
+    )
     return RunAccepted(
         run_id=run_id,
         state="queued",

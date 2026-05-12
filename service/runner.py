@@ -147,9 +147,19 @@ def _maybe_build_mutator():
 # ────────────────────────────────────────────────────────────────────
 
 
-async def execute_run(run_id: str, target_url: str, suite_ref: str) -> None:
+async def execute_run(
+    run_id: str,
+    target_url: str,
+    suite_ref: str,
+    categories_override: list[str] | None = None,
+) -> None:
     """Run the suite asynchronously. Writes per-attempt rows + the final
-    totals/gate back to SQLite."""
+    totals/gate back to SQLite.
+
+    `categories_override`, when provided, replaces the suite's
+    default category list — used by the dashboard's Ad Hoc Run page
+    so the user-checked categories actually drive what runs.
+    """
     db.update_run(run_id, {"state": "running"})
 
     suite = SUITE_REGISTRY.get(suite_ref)
@@ -186,7 +196,14 @@ async def execute_run(run_id: str, target_url: str, suite_ref: str) -> None:
     n_mutations = int(os.getenv("N_MUTATIONS", "2") or "2")
 
     dispatcher = SeedDispatcher(SEEDS_ROOT)
-    seeds = list(dispatcher.stream_batch(categories=suite["categories"], n=suite["limit"]))
+    # User-supplied category override takes precedence over the suite's
+    # default category list, but the suite's seed cap still applies.
+    effective_categories = (
+        categories_override if categories_override else suite["categories"]
+    )
+    seeds = list(
+        dispatcher.stream_batch(categories=effective_categories, n=suite["limit"])
+    )
 
     totals = {"pass": 0, "fail": 0, "partial": 0, "inconclusive": 0}
     total_spend = 0.0
