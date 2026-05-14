@@ -71,13 +71,20 @@ def test_submit_smoke_run_and_poll_to_completion():
             "target_url": target,
             "suite_ref": "promotion-gate-prod-v1",
             "source": "circleci",
+            # Scope the smoke campaign to one priority-1 category so it
+            # completes in <2 min even with ENABLE_MUTATIONS=1 on the
+            # deployed agent. The smoke test's job is to prove
+            # end-to-end connectivity, not to exhaustively re-run the
+            # suite — broader coverage lives in the adversary-gate CI
+            # job and in manual campaigns.
+            "categories": ["data_exfil_authorization_bypass"],
         },
         timeout=15,
     )
     assert r.status_code == 202, f"submit failed: {r.status_code} {r.text[:200]}"
     run_id = r.json()["run_id"]
 
-    deadline = time.time() + 300  # 5 min
+    deadline = time.time() + 600  # 10 min (mutation pass + judge backoff)
     while time.time() < deadline:
         s = requests.get(
             f"{base}/regression-runs/{run_id}", headers=headers, timeout=10
