@@ -94,8 +94,33 @@ class AbliteratedRunPodClient:
                     json=body,
                     headers=headers,
                 )
+            except httpx.TimeoutException as exc:
+                # The most common manifestation of RunPod balance exhaustion
+                # is that workers report "ready" but never actually dispatch
+                # jobs, so /runsync times out. Distinguish this from a real
+                # request error so the runner can surface it correctly.
+                raise LLMClientError(
+                    "mutator_unavailable: RunPod /runsync timed out after "
+                    f"{self.timeout_s}s — workers may be unresponsive due to "
+                    "billing / quota / capacity. Check the endpoint dashboard."
+                ) from exc
             except httpx.HTTPError as exc:
                 raise LLMClientError(f"RunPod request failed: {exc}") from exc
+        if resp.status_code in (401, 402, 403):
+            raise LLMClientError(
+                f"mutator_unavailable: RunPod returned {resp.status_code} — "
+                "likely auth / billing issue. Body: " + resp.text[:200]
+            )
+        if resp.status_code == 429:
+            raise LLMClientError(
+                "mutator_unavailable: RunPod rate-limited (429). "
+                "Body: " + resp.text[:200]
+            )
+        if resp.status_code >= 500:
+            raise LLMClientError(
+                f"mutator_unavailable: RunPod {resp.status_code} server error. "
+                "Body: " + resp.text[:200]
+            )
         if resp.status_code >= 400:
             raise LLMClientError(
                 f"RunPod returned {resp.status_code}: {resp.text[:300]}"

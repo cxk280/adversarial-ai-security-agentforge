@@ -45,9 +45,56 @@ class AttackResult:
     error: str | None = None
     timestamp: float = field(default_factory=time.time)
     extra: dict = field(default_factory=dict)
+    # When True, the target's own LLM provider returned a hard
+    # availability error (e.g. Anthropic credit balance exhausted,
+    # rate limit, 5xx). The judge MUST score this as inconclusive —
+    # we can't tell whether the target held or leaked when it never
+    # produced a real response. unavailable_reason is the short
+    # operator-facing tag (one of: 'credit_exhausted', 'rate_limited',
+    # 'upstream_5xx', 'target_unreachable').
+    target_unavailable: bool = False
+    unavailable_reason: str | None = None
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+
+# Patterns that indicate the target's LLM provider has refused to serve
+# us — these MUST NOT be passed to the judge as if they were target
+# responses. The judge would score "credit balance too low" against the
+# rubric and likely call it a pass or fail rather than inconclusive.
+_PROVIDER_OUTAGE_MARKERS = (
+    "credit balance is too low",
+    "credit balance too low",
+    "insufficient_quota",
+    "you exceeded your current quota",
+    "rate_limit_exceeded",
+    "overloaded_error",
+)
+
+
+def _classify_upstream_failure(status: int, text: str) -> tuple[bool, str | None]:
+    """Detect whether the target's LLM provider returned a hard
+    availability error inside an otherwise-valid HTTP response.
+
+    Returns (target_unavailable, reason). reason is one of:
+      'credit_exhausted', 'rate_limited', 'upstream_5xx',
+      'target_unreachable', or None when the response is real."""
+    body_lower = (text or "").lower()
+    if any(m in body_lower for m in _PROVIDER_OUTAGE_MARKERS[:2]):
+        return True, "credit_exhausted"
+    if "rate_limit" in body_lower or "rate limit" in body_lower or status == 429:
+        return True, "rate_limited"
+    if "insufficient_quota" in body_lower or "exceeded your current quota" in body_lower:
+        return True, "credit_exhausted"
+    if "overloaded" in body_lower or status == 529:
+        return True, "upstream_5xx"
+    if 500 <= status < 600:
+        return True, "upstream_5xx"
+    # 402 = Payment Required. Some providers use it for billing.
+    if status == 402:
+        return True, "credit_exhausted"
+    return False, None
 
 
 class CoPilotExecutor:
@@ -174,6 +221,20 @@ class CoPilotExecutor:
             error = f"{type(exc).__name__}: {exc}"
         latency_ms = int((time.monotonic() - start) * 1000)
 
+        # Detect upstream LLM provider outages so the judge isn't asked
+        # to score "credit balance too low" against the rubric. Both
+        # status code AND body are inspected because the target wraps
+        # 400-class errors from Anthropic into its own response envelope.
+        target_unavailable = False
+        unavailable_reason: str | None = None
+        if error is not None and "RequestException" in error:
+            target_unavailable = True
+            unavailable_reason = "target_unreachable"
+        elif status:
+            target_unavailable, unavailable_reason = _classify_upstream_failure(
+                status, text
+            )
+
         return AttackResult(
             attack_id=attack_id,
             campaign_id=campaign_id,
@@ -186,6 +247,8 @@ class CoPilotExecutor:
             response_text=text,
             latency_ms=latency_ms,
             error=error,
+            target_unavailable=target_unavailable,
+            unavailable_reason=unavailable_reason,
         )
 
     @staticmethod

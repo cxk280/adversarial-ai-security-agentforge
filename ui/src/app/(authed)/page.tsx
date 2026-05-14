@@ -7,7 +7,7 @@ import { FindingRow } from "@/components/finding-row";
 import { RecentRunsCard } from "@/components/recent-runs-card";
 import { useFindings, useRuns, useCoverage } from "@/hooks/use-runs";
 import { relativeTime, usd } from "@/lib/format";
-import { pingTarget, type TargetPing } from "@/lib/api";
+import { pingTarget, type TargetPing, type RunSummary } from "@/lib/api";
 import { useTarget } from "@/lib/target-context";
 import { cn } from "@/lib/utils";
 
@@ -129,6 +129,8 @@ export default function DashboardPage() {
             tone={stats.spendToday < 4 ? "green" : "orange"}
           />
         </div>
+
+        <ResilienceTrend runs={runs} />
 
         <div className="grid grid-cols-2 gap-5">
           <section className="rounded-xl border border-slate-200 bg-white">
@@ -256,6 +258,184 @@ function TargetPingWidget() {
             : "probing…"}
       </div>
     </button>
+  );
+}
+
+/**
+ * Resilience-over-time trend. The instructor's PDF asks "Is the target
+ * system becoming more or less resilient over time?" — this is the
+ * literal chart that answers it. X-axis: campaign chronology
+ * (oldest → newest). Y-axis: hold rate per campaign
+ * (fail / (pass+fail+partial+inconclusive)). Renders as an inline SVG
+ * sparkline-style chart so we avoid dragging in a charting library.
+ */
+function ResilienceTrend({ runs }: { runs: RunSummary[] }) {
+  // Drop the in-flight run if any so we plot completed snapshots only.
+  const completed = useMemo(
+    () =>
+      [...runs]
+        .filter((r) => r.state === "completed" && r.totals)
+        .sort(
+          (a, b) =>
+            new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+        ),
+    [runs],
+  );
+
+  if (completed.length < 2) {
+    return (
+      <section className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+        <header className="flex items-center justify-between">
+          <h3 className="font-semibold text-slate-900">Target resilience over time</h3>
+          <span className="text-[11px] text-slate-500">
+            need ≥2 completed campaigns
+          </span>
+        </header>
+        <p className="mt-2 text-xs text-slate-500">
+          Trend will appear once at least two campaigns have finished.
+          Hold-rate (% attacks held) is plotted per campaign in chronological
+          order to answer: <em>is the target becoming more or less resilient?</em>
+        </p>
+      </section>
+    );
+  }
+
+  const points = completed.map((r) => {
+    const t = r.totals ?? { pass: 0, fail: 0, partial: 0, inconclusive: 0 };
+    const denom = t.pass + t.fail + t.partial + t.inconclusive;
+    const rate = denom === 0 ? null : t.fail / denom;
+    return {
+      run_id: r.run_id,
+      when: r.started_at,
+      rate,
+      pass: t.pass,
+      total: denom,
+    };
+  });
+
+  const validPoints = points.filter((p) => p.rate !== null) as Array<{
+    run_id: string;
+    when: string;
+    rate: number;
+    pass: number;
+    total: number;
+  }>;
+  if (validPoints.length < 2) {
+    return null;
+  }
+
+  const W = 720;
+  const H = 120;
+  const pad = { top: 10, right: 12, bottom: 24, left: 32 };
+  const innerW = W - pad.left - pad.right;
+  const innerH = H - pad.top - pad.bottom;
+
+  const x = (i: number) =>
+    pad.left + (validPoints.length === 1 ? innerW / 2 : (i * innerW) / (validPoints.length - 1));
+  const y = (r: number) => pad.top + innerH * (1 - r); // rate 0..1 → top..bottom
+
+  const pathD = validPoints
+    .map((p, i) => `${i === 0 ? "M" : "L"}${x(i).toFixed(1)},${y(p.rate).toFixed(1)}`)
+    .join(" ");
+
+  const latest = validPoints[validPoints.length - 1];
+  const first = validPoints[0];
+  const direction = latest.rate - first.rate;
+  const directionLabel =
+    Math.abs(direction) < 0.01
+      ? "stable"
+      : direction > 0
+        ? "improving"
+        : "regressing";
+  const directionTone =
+    directionLabel === "improving"
+      ? "text-green-700"
+      : directionLabel === "regressing"
+        ? "text-red-700"
+        : "text-slate-600";
+
+  return (
+    <section className="rounded-xl border border-slate-200 bg-white px-5 py-4">
+      <header className="flex items-center justify-between">
+        <h3 className="font-semibold text-slate-900">Target resilience over time</h3>
+        <div className="flex items-center gap-2 text-[11px]">
+          <span className="text-slate-500">latest hold rate:</span>
+          <span className={cn("font-bold", directionTone)}>
+            {(latest.rate * 100).toFixed(1)}%
+          </span>
+          <span className="text-slate-400">·</span>
+          <span className={cn("font-semibold", directionTone)}>{directionLabel}</span>
+        </div>
+      </header>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        width="100%"
+        height={H}
+        role="img"
+        aria-label="Hold-rate per campaign, oldest to newest"
+        className="mt-2"
+      >
+        {/* Y-axis grid lines at 0/50/100 */}
+        {[0, 0.5, 1].map((g) => (
+          <g key={g}>
+            <line
+              x1={pad.left}
+              x2={W - pad.right}
+              y1={y(g)}
+              y2={y(g)}
+              stroke="rgb(226 232 240)"
+              strokeDasharray="2,3"
+            />
+            <text
+              x={pad.left - 6}
+              y={y(g) + 3}
+              textAnchor="end"
+              fontSize="9"
+              fill="rgb(100 116 139)"
+            >
+              {(g * 100).toFixed(0)}%
+            </text>
+          </g>
+        ))}
+        {/* Line */}
+        <path d={pathD} fill="none" stroke="rgb(13 148 136)" strokeWidth="1.75" />
+        {/* Points */}
+        {validPoints.map((p, i) => (
+          <g key={p.run_id}>
+            <circle
+              cx={x(i)}
+              cy={y(p.rate)}
+              r="3"
+              fill={p.pass > 0 ? "rgb(239 68 68)" : "rgb(16 185 129)"}
+              stroke="white"
+              strokeWidth="1.25"
+            >
+              <title>
+                {p.run_id.slice(0, 24)}  ·  {(p.rate * 100).toFixed(1)}% hold  ·  {p.pass} exploit
+                {p.pass === 1 ? "" : "s"} / {p.total} attacks
+              </title>
+            </circle>
+          </g>
+        ))}
+        {/* X-axis date labels: first + last */}
+        <text x={pad.left} y={H - 4} fontSize="9" fill="rgb(100 116 139)">
+          {new Date(first.when).toLocaleDateString()}
+        </text>
+        <text
+          x={W - pad.right}
+          y={H - 4}
+          fontSize="9"
+          fill="rgb(100 116 139)"
+          textAnchor="end"
+        >
+          {new Date(latest.when).toLocaleDateString()}
+        </text>
+      </svg>
+      <p className="mt-1 text-[11px] text-slate-500">
+        Each point is one completed campaign. Red dot = exploits were found in
+        that campaign; green = target held every attack.
+      </p>
+    </section>
   );
 }
 

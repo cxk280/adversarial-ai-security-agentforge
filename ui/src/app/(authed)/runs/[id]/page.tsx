@@ -102,6 +102,8 @@ export default function RunDetailPage({ params }: PageProps) {
           </div>
         )}
 
+        <TargetOutageBanner attempts={attempts} />
+
         {/* Cross-platform jump links */}
         <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-amber-50/30 px-4 py-3 text-xs">
           <span className="font-semibold text-slate-700">Trace tree:</span>
@@ -172,6 +174,14 @@ export default function RunDetailPage({ params }: PageProps) {
                 <span className="self-center truncate text-xs">
                   <code className="rounded bg-slate-100 px-1 text-[11px]">{a.seed_id}</code>
                   <span className="ml-2 text-slate-500">{a.category} / {a.subcategory}</span>
+                  {a.is_regression && (
+                    <span
+                      className="ml-2 inline-flex items-center gap-1 rounded bg-purple-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-purple-800"
+                      title="This attack_id was previously marked resolved but is succeeding again — a regression."
+                    >
+                      ⚠ Regression
+                    </span>
+                  )}
                 </span>
                 <span className="self-center"><JudgePips a={a} /></span>
                 <span className="self-center text-xs text-slate-600">{a.latency_ms}ms</span>
@@ -209,6 +219,40 @@ export default function RunDetailPage({ params }: PageProps) {
           <div className="text-center text-sm text-slate-500">Loading run metadata…</div>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Provider-outage banner. When attempts in this run carry a reason_code
+ * of `target_unavailable:*` we must not let the verdict numbers look
+ * normal — they're not real held-vs-leaked signals, they're just the
+ * target's upstream LLM returning errors. Surface the outage loudly so
+ * the demo viewer doesn't misread the run.
+ */
+function TargetOutageBanner({ attempts }: { attempts: Attempt[] }) {
+  const outages = attempts.filter((a) =>
+    (a.reason_code || "").startsWith("target_unavailable:"),
+  );
+  if (outages.length === 0) return null;
+  const reasons = new Set(
+    outages.map((a) => (a.reason_code || "").replace("target_unavailable:", "")),
+  );
+  return (
+    <div className="rounded-xl border-2 border-red-300 bg-red-50/60 px-4 py-3 text-xs">
+      <div className="flex items-center gap-2 font-bold uppercase tracking-wide text-red-800">
+        <span>⚠</span>
+        <span>Target unavailable during this run</span>
+      </div>
+      <p className="mt-1 text-red-900">
+        {outages.length} of {attempts.length} attempts could not be evaluated
+        because the target&apos;s upstream LLM provider returned an error
+        ({[...reasons].join(", ")}). These attempts are scored{" "}
+        <code className="rounded bg-red-100 px-1">inconclusive</code> rather than
+        pass/fail — the target never actually got a chance to hold or leak.
+        Re-run after the underlying credit / quota issue is resolved to get a
+        clean verdict.
+      </p>
     </div>
   );
 }

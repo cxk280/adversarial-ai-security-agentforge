@@ -235,6 +235,9 @@ export interface Attempt {
   judges_agreed?: 0 | 1 | null;
   confidence?: "high" | "medium" | "low" | null;
   reason_code?: string | null;
+  /** True when this attempt is verdict=pass on an attack_id whose
+   * owning VULN-NNNN was previously marked resolved. */
+  is_regression?: boolean;
 }
 
 export function listAttempts(runId: string): Promise<{ run_id: string; attempts: Attempt[]; count: number }> {

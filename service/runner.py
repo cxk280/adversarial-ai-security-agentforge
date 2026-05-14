@@ -221,6 +221,7 @@ async def execute_run(
     high_sev_passes = 0
     t0 = time.monotonic()
     cancelled = False
+    gate_reasons: list[str] = []
 
     def _is_cancelled() -> bool:
         """Cooperative cancellation probe. The /regression-runs/{id}/cancel
@@ -261,7 +262,17 @@ async def execute_run(
                         ),
                     )
                 except Exception as exc:
-                    print(f"[runner] mutate({atk.id}) failed: {exc}")
+                    msg = str(exc)
+                    print(f"[runner] mutate({atk.id}) failed: {msg}")
+                    # If the mutator itself is unavailable (RunPod billing
+                    # exhausted, rate limit, etc.) record that on the run
+                    # so the UI can surface it instead of silently
+                    # downgrading to seeds-only.
+                    if "mutator_unavailable" in msg:
+                        gate_reasons.append(
+                            f"mutator_unavailable: {msg[:200]}"
+                        )
+                        mutator = None  # don't keep trying
                     variants = []
                 for v in variants:
                     if _is_cancelled():
@@ -281,7 +292,6 @@ async def execute_run(
     duration_s = int(time.monotonic() - t0) if seeds else 0
     total_attacks = sum(totals.values())
     gate_verdict = "fail" if high_sev_passes > 0 else "pass"
-    gate_reasons: list[str] = []
     if high_sev_passes > 0:
         gate_reasons.append(
             f"{high_sev_passes} new high-severity exploit(s) detected"
@@ -520,6 +530,39 @@ async def _run_one(atk: Attack, executor, judge, run_id: str, run_tr=None):
         judges_agreed = None
         confidence = None
         reason_code = None
+
+        # Provider-outage short circuit. If the target's LLM is
+        # credit-exhausted / rate-limited / 5xx, we never got a real
+        # response back. Asking the judge to score "credit balance too
+        # low" against the rubric would produce garbage verdicts — the
+        # right answer is 'inconclusive' with a clear reason_code.
+        if result.target_unavailable:
+            verdict = "inconclusive"
+            reason_code = f"target_unavailable:{result.unavailable_reason or 'unknown'}"
+            db.insert_attempt(
+                {
+                    "attempt_id": uuid.uuid4().hex,
+                    "run_id": run_id,
+                    "seed_id": atk.id,
+                    "category": atk.category,
+                    "subcategory": atk.subcategory,
+                    "verdict": verdict,
+                    "response_text": (result.response_text or "")[:8000],
+                    "latency_ms": result.latency_ms,
+                    "spend_usd": 0.0,
+                    "started_at": now_iso(),
+                    "primary_verdict": None,
+                    "primary_model": None,
+                    "secondary_verdict": None,
+                    "secondary_model": None,
+                    "arbitrator_verdict": None,
+                    "arbitrator_model": None,
+                    "judges_agreed": None,
+                    "confidence": None,
+                    "reason_code": reason_code,
+                }
+            )
+            return 0.0, verdict
 
         # LLM Judge — if configured
         if judge is not None:

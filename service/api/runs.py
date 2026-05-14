@@ -132,16 +132,51 @@ async def list_runs(
     return {"runs": rows, "count": len(rows)}
 
 
+def _resolved_attack_ids() -> set[str]:
+    """Set of attack_ids that have ever been marked resolved.
+
+    Used to flag regressions: a verdict=pass on a previously-resolved
+    attack_id is a returning vulnerability — exactly the case the
+    PDF calls out ("Detect when a previously-fixed vulnerability has
+    reappeared")."""
+    overrides = db.list_finding_status_overrides()
+    resolved_vuln_ids = {
+        finding_id for finding_id, ovr in overrides.items()
+        if ovr.get("status") == "resolved"
+    }
+    if not resolved_vuln_ids:
+        return set()
+    # Resolve each VULN-NNNN to its attack_id via doc_agent_outputs.
+    out: set[str] = set()
+    for doc in db.list_doc_agent_outputs().values():
+        if doc.get("assigned_vuln_id") in resolved_vuln_ids:
+            atk = doc.get("attack_id")
+            if atk:
+                out.add(atk)
+    return out
+
+
 @router.get("/regression-runs/{run_id}/attempts")
 async def get_run_attempts(
     run_id: str,
     _token: str = Depends(require_bearer),
 ) -> dict:
-    """Per-attack rows for a run — what the Run Detail UI page renders."""
+    """Per-attack rows for a run — what the Run Detail UI page renders.
+
+    Each attempt carries an `is_regression` flag: true when verdict=pass
+    on a seed_id whose owning VULN-NNNN was previously marked resolved.
+    """
     row = db.get_run(run_id)
     if row is None:
         raise HTTPException(404, f"Run {run_id!r} not found")
     attempts = db.list_attempts(run_id)
+    resolved = _resolved_attack_ids()
+    for a in attempts:
+        # Strip any -mut-XXXXXX suffix to compare against base attack_id.
+        base_seed = (a.get("seed_id") or "").split("-mut-")[0]
+        a["is_regression"] = (
+            a.get("verdict") == "pass" and base_seed in resolved
+        )
     return {"run_id": run_id, "attempts": attempts, "count": len(attempts)}
 
 
