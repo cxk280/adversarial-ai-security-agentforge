@@ -9,7 +9,7 @@ import { submitRun, type Attempt } from "@/lib/api";
 import { useAttempts, useRun, useCancelRun } from "@/hooks/use-runs";
 import { useActiveRunId } from "@/lib/use-active-run-id";
 import { usd } from "@/lib/format";
-import { useTarget } from "@/lib/target-context";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 
 // id = seed directory under evals/seeds/. Sent to the backend on
 // Launch so the user's checkbox selection actually drives what runs.
@@ -95,6 +95,21 @@ function RunPageInner() {
   const { data: attemptsData } = useAttempts(activeRunId ?? undefined);
   const cancelMutation = useCancelRun();
 
+  // The active run is tracked across page visits in sessionStorage so a
+  // user can navigate away and back without losing the live stream.
+  // But it belongs to a specific target — if the user changes the
+  // TopBar dropdown while a run is in flight, the verdict stream from
+  // the OTHER env shouldn't keep rendering on this page; it'd be
+  // misleading. Mask it: from this page's perspective, an active run
+  // on a non-matching target is "not running here." (sessionStorage
+  // keeps the id, so switching back to the run's env immediately
+  // restores the stream.) During the brief moment between activeRunId
+  // being set and runData arriving, we keep the stream visible so the
+  // launching → running transition stays smooth.
+  const runMatchesTarget =
+    !runData || matchesTarget(runData.target_url, target);
+  const effectiveActiveRunId = runMatchesTarget ? activeRunId : null;
+
   const toggle = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -148,7 +163,8 @@ function RunPageInner() {
   };
 
   const isRunning =
-    runData?.state === "running" || runData?.state === "queued";
+    runMatchesTarget &&
+    (runData?.state === "running" || runData?.state === "queued");
 
   // Once useRun reports running/queued, clear the local launching flag.
   // Combined with the lingering `launching=true` above, this guarantees
@@ -396,7 +412,7 @@ function RunPageInner() {
                 <h3 className="font-semibold text-slate-900">Live verdict stream</h3>
                 <StatusDot
                   state={
-                    !activeRunId ? "idle"
+                    !effectiveActiveRunId ? "idle"
                       : isRunning ? "running"
                         : isCancelled ? "cancelled"
                           : isDone ? "done" : "idle"
@@ -404,11 +420,11 @@ function RunPageInner() {
                 />
               </header>
               <LiveStream
-                activeRunId={activeRunId}
-                attempts={attempts}
-                runState={runData?.state}
-                totals={liveTotals}
-                spendUsd={runData?.spend_usd ?? liveSpend}
+                activeRunId={effectiveActiveRunId}
+                attempts={effectiveActiveRunId ? attempts : []}
+                runState={effectiveActiveRunId ? runData?.state : undefined}
+                totals={effectiveActiveRunId ? liveTotals : undefined}
+                spendUsd={effectiveActiveRunId ? (runData?.spend_usd ?? liveSpend) : undefined}
               />
             </section>
           </aside>
