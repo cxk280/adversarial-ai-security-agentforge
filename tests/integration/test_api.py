@@ -37,7 +37,7 @@ def client(monkeypatch):
     # Stub the runner so submitted runs don't dispatch real HTTP.
     from service.api import runs as runs_mod
 
-    async def _fake_executor(run_id, target_url, suite_ref):
+    async def _fake_executor(run_id, target_url, suite_ref, categories=None):
         from service import db
         db.update_run(
             run_id,
