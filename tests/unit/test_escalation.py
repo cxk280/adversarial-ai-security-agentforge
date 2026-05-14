@@ -64,9 +64,9 @@ def test_t2_does_not_fire_at_shallow_depth():
 @pytest.mark.parametrize(
     "category,subcategory",
     [
-        ("prompt_injection", "multi_turn_crescendo"),
-        ("prompt_injection", "indirect_reasoning_required"),
-        ("identity_role_exploitation", "trust_boundary"),
+        ("prompt_injection", "multi_turn"),
+        ("prompt_injection", "indirect"),
+        ("identity_role_exploitation", "trust_boundary_violation"),
     ],
 )
 def test_t3_fires_for_each_reasoning_heavy_subcategory(category, subcategory):
@@ -77,18 +77,21 @@ def test_t3_fires_for_each_reasoning_heavy_subcategory(category, subcategory):
 
 
 def test_t3_does_not_fire_for_unrelated_category():
+    # Use a subcategory NOT in REASONING_HEAVY_CATEGORIES. prompt_injection/direct
+    # is the priority-12 baseline seed dir, never reasoning-heavy.
     state = CampaignState(category="prompt_injection", subcategory="direct")
     assert decide(state).should_escalate is False
 
 
 def test_t3_membership_set_is_documented():
     # If we add categories to the set, ARCHITECTURE.md §1.1.1 must list them.
-    # This guards against silent drift.
+    # This guards against silent drift. Names match the seed YAMLs'
+    # subcategory: field literally — see escalation.py header comment.
     assert REASONING_HEAVY_CATEGORIES == frozenset(
         {
-            "prompt_injection/multi_turn_crescendo",
-            "prompt_injection/indirect_reasoning_required",
-            "identity_role_exploitation/trust_boundary",
+            "prompt_injection/multi_turn",
+            "prompt_injection/indirect",
+            "identity_role_exploitation/trust_boundary_violation",
         }
     )
 
