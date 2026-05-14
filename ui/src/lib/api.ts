@@ -267,6 +267,56 @@ export function pingTarget(url?: string): Promise<TargetPing> {
 }
 
 
+// ─── Judge ground-truth accuracy ────────────────────────────────
+
+export interface JudgeAccuracy {
+  ran_at: string;
+  judge_models: {
+    primary: string | null;
+    secondary: string | null;
+    arbitrator: string | null;
+  };
+  summary: {
+    total: number;
+    correct: number;
+    accuracy: number | null;
+    by_verdict: Record<string, { total: number; correct: number }>;
+    disagreements: number;
+    arbitrator_used: number;
+    total_usd: number;
+    duration_s: number;
+  };
+  cases: Array<{
+    id: string;
+    expected: string;
+    actual: string;
+    correct: boolean;
+    primary?: string;
+    primary_model?: string;
+    secondary?: string;
+    secondary_model?: string;
+    arbitrator?: string | null;
+    arbitrator_model?: string | null;
+    agreed?: boolean;
+    confidence?: string;
+    reason_code?: string;
+    rationale?: string;
+    error?: string;
+  }>;
+}
+
+export async function fetchJudgeAccuracy(): Promise<JudgeAccuracy | null> {
+  try {
+    return await request<JudgeAccuracy>(`/judge-accuracy`);
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 404) {
+      return null;
+    }
+    throw e;
+  }
+}
+
+
 // ─── Coverage (subcategory-level aggregates) ──────────────────
 
 export interface CoverageRow {

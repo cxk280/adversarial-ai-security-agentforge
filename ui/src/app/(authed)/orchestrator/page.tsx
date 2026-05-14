@@ -1,11 +1,12 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
 import { useRuns } from "@/hooks/use-runs";
-import type { RunSummary } from "@/lib/api";
+import { fetchJudgeAccuracy, type JudgeAccuracy, type RunSummary } from "@/lib/api";
 
 /**
  * Orchestrator — shows the platform's *configuration* (budget caps,
@@ -145,6 +146,7 @@ export default function OrchestratorPage() {
                 ))}
               </>
             )}
+            <JudgeAccuracyPanel />
           </section>
 
           {/* Right column */}
@@ -293,5 +295,109 @@ function BudgetBar({
         />
       </div>
     </div>
+  );
+}
+
+/**
+ * Judge ground-truth panel ("Testing the Tester"). The PDF asks for a
+ * ground-truth dataset that validates the Judge Agent's accuracy. This
+ * panel surfaces the latest result from /judge-accuracy: how often
+ * the production Dual-Judge converges on the human label across the
+ * 12 hand-labeled cases in evals/judge_ground_truth/cases.yaml.
+ *
+ * Run a fresh eval with `python -m evals.judge_ground_truth.run`
+ * inside the adversary-agent service.
+ */
+function JudgeAccuracyPanel() {
+  const [data, setData] = useState<JudgeAccuracy | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchJudgeAccuracy()
+      .then((d) => {
+        if (!cancelled) {
+          setData(d);
+          setLoading(false);
+        }
+      })
+      .catch((e) => {
+        if (!cancelled) {
+          setErr(e instanceof Error ? e.message : "fetch failed");
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <section className="border-t border-amber-100">
+      <header className="px-5 py-3 text-[10px] font-bold uppercase tracking-wide text-slate-500">
+        Judge accuracy (Testing the Tester)
+      </header>
+      <div className="px-5 pb-4 text-xs">
+        {loading && <span className="text-slate-500">Loading…</span>}
+        {err && (
+          <div className="rounded border border-red-200 bg-red-50/60 px-2 py-1.5 text-[11px] text-red-700">
+            {err}
+          </div>
+        )}
+        {!loading && !err && !data && (
+          <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+            <div className="font-semibold text-slate-800">
+              No ground-truth eval has run yet.
+            </div>
+            <div className="mt-1">
+              Generate one inside the agent container:
+              <code className="ml-1 rounded bg-slate-100 px-1 font-mono text-[10px]">
+                python -m evals.judge_ground_truth.run
+              </code>
+            </div>
+            <div className="mt-1 text-slate-500">
+              12 hand-labeled cases (pass / fail / partial / inconclusive)
+              live in <code className="font-mono text-[10px]">evals/judge_ground_truth/cases.yaml</code>.
+            </div>
+          </div>
+        )}
+        {data && (
+          <div className="space-y-2">
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-slate-900">
+                {((data.summary.accuracy ?? 0) * 100).toFixed(1)}%
+              </span>
+              <span className="text-[11px] text-slate-600">
+                {data.summary.correct} / {data.summary.total} cases agree with human label
+              </span>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5 text-[10px]">
+              {Object.entries(data.summary.by_verdict).map(([k, v]) => (
+                <div
+                  key={k}
+                  className="rounded border border-slate-200 bg-slate-50 px-2 py-1.5"
+                  title={`${v.correct}/${v.total} correct on ${k} cases`}
+                >
+                  <div className="font-bold uppercase tracking-wide text-slate-500">
+                    {k}
+                  </div>
+                  <div className="text-slate-900">
+                    {v.correct} / {v.total}
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="text-[10px] text-slate-500">
+              {data.summary.disagreements} primary↔secondary disagreement
+              {data.summary.disagreements === 1 ? "" : "s"} ·{" "}
+              {data.summary.arbitrator_used} arbitrator invocation
+              {data.summary.arbitrator_used === 1 ? "" : "s"} · spent ${data.summary.total_usd.toFixed(4)} ·
+              ran {relativeTime(data.ran_at)}
+            </div>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

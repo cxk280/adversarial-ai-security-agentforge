@@ -227,6 +227,30 @@ async def get_coverage(_token: str = Depends(require_bearer)) -> dict:
     return {"rows": db.coverage_by_subcategory()}
 
 
+@router.get("/judge-accuracy")
+async def get_judge_accuracy(_token: str = Depends(require_bearer)) -> dict:
+    """Latest judge ground-truth eval result.
+
+    Answers the PDF's Phase 3 §10 question: "Ground truth dataset for
+    evaluating Judge Agent accuracy?" — yes, hand-labeled cases in
+    evals/judge_ground_truth/cases.yaml, scored against the production
+    Dual-Judge, with the latest result served here.
+
+    Returns 404 if no eval has been run yet. Triggering a fresh eval
+    is a CLI step (`python -m evals.judge_ground_truth.run`) — it's
+    not exposed as an API call because it spends real LLM credits."""
+    from evals.judge_ground_truth.run import read_latest
+
+    latest = read_latest()
+    if latest is None:
+        raise HTTPException(
+            404,
+            "No judge-accuracy eval has been run. "
+            "Run `python -m evals.judge_ground_truth.run` to generate one.",
+        )
+    return latest
+
+
 @router.get("/target/ping")
 async def ping_target(
     url: str | None = None,
