@@ -13,11 +13,15 @@ from dataclasses import dataclass, field
 # Categories that ALWAYS run on DeepSeek (trigger #3). Each entry is
 # "<category>/<subcategory>" matching the seed YAML's category/subcategory
 # fields. Keep this list in sync with the §1.1.1 list in ARCHITECTURE.md.
+#
+# Names match the seed YAMLs' `subcategory:` field literally — not the
+# /run page's seed-directory names. Updated 2026-05-14 after the initial
+# list diverged from the actual seed taxonomy.
 REASONING_HEAVY_CATEGORIES: frozenset[str] = frozenset(
     {
-        "prompt_injection/multi_turn_crescendo",
-        "prompt_injection/indirect_reasoning_required",
-        "identity_role_exploitation/trust_boundary",
+        "prompt_injection/multi_turn",
+        "prompt_injection/indirect",
+        "identity_role_exploitation/trust_boundary_violation",
     }
 )
 

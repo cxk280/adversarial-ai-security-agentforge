@@ -19,6 +19,35 @@ Auth is bearer-token: the UI carries `NEXT_PUBLIC_ADVERSARY_API_TOKEN`; the agen
 
 Week 3 of the Gauntlet AI Austin admission track. Sprint: 2026-05-11 (Mon) → 2026-05-15 (Fri noon CT). Authorization window for adversarial testing: 2026-05-11 → 2026-05-22.
 
+### Final-submission feedback loop (2026-05-14)
+
+In response to instructor feedback, the run-detail page now surfaces
+per-attempt **Primary / Secondary / Arbitrator** verdicts and an
+agree/split chip — making the dual-Judge cross-validation visible
+at-a-glance. The Coverage page now drives the **orchestrator's next
+target** via a "Re-run gaps" CTA that pre-selects the top
+priority-ranked untested/failing subcategories on `/run`.
+Reproducible eval artifacts are downloadable from every run's
+detail page (`/runs/<id>/artifact` returns a JSON bundle of run
+metadata + every attempt with the full judge breakdown). A live
+**target connectivity** probe pings the selected Co-Pilot's
+`/health` every 30s on the dashboard.
+
+### LLM hosting map
+
+| Role | Model | Hosted by |
+|------|-------|-----------|
+| Mutator (primary) | `huihui-ai/Llama-3.2-3B-Instruct-abliterated-finetuned` | **RunPod** (self-hosted, native `/runsync`) |
+| Mutator (escalation) | `deepseek-r1` | DeepSeek API |
+| Primary Judge | Claude Haiku 4.5 | Anthropic API |
+| Secondary Judge | GPT-4.1-mini | OpenAI API |
+| Arbitrator Judge | Claude Sonnet 4.6 | Anthropic API |
+| Documentation Agent | Claude Sonnet 4.6 | Anthropic API |
+
+RunPod hosts only the abliterated mutator. Escalation triggers
+(`agents/red_team/escalation.py`) decide per-attempt whether the
+mutator runs on huihui (RunPod) or escalates to DeepSeek-R1.
+
 ## Deliverables
 
 | Deliverable | Status |
