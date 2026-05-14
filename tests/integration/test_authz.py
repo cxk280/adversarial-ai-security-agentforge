@@ -110,14 +110,21 @@ def test_non_allowlisted_target_rejected(evil_url):
         ("source_url", "javascript:alert(1)"),
     ],
 )
-def test_injection_inputs_dont_crash_or_execute(field, value, tmp_path):
+def test_injection_inputs_dont_crash_or_execute(field, value, tmp_path, monkeypatch):
     """The API must accept (and either validate or sanitize) hostile
     inputs without crashing or executing them. We don't check the
     exact response code — just that it's NOT 500 (which would mean
     the input crashed the parser/dispatcher).
 
     Uses TestClient as a context manager so the FastAPI lifespan runs
-    and creates the SQLite schema first."""
+    and creates the SQLite schema first.
+
+    NB: monkeypatches execute_run so the test doesn't actually dispatch
+    a 9-minute live campaign per parametrization — the point of this
+    test is to verify the API layer's input handling, not exercise the
+    full runner. Without the stub the test timed out in CI once the
+    target was reachable (it succeeded earlier only because Anthropic
+    was returning 400s and the runner aborted fast)."""
     # Fresh DB per parametrization so writes don't accumulate.
     os.environ["ADVERSARY_DB_PATH"] = str(tmp_path / "test.sqlite")
     os.environ["ADVERSARY_DISABLE_AUTH"] = "1"
@@ -127,6 +134,21 @@ def test_injection_inputs_dont_crash_or_execute(field, value, tmp_path):
         "suite_ref": "promotion-gate-v1",
     }
     body[field] = value
+    # Stub the runner — same shape as tests/integration/test_api.py's
+    # _fake_executor: positional (run_id, target_url, suite_ref) + the
+    # categories= kwarg, mark the run completed immediately so the
+    # FastAPI lifespan teardown doesn't block on a real campaign.
+    from service.api import runs as runs_mod
+
+    async def _fake_executor(run_id, target_url, suite_ref, categories=None):
+        from service import db
+        db.update_run(
+            run_id,
+            {"state": "completed", "ended_at": "2026-05-11T18:00:00+00:00"},
+        )
+
+    monkeypatch.setattr(runs_mod, "execute_run", _fake_executor)
+
     from fastapi.testclient import TestClient
     with TestClient(app) as client:
         r = client.post("/regression-runs", json=body)
