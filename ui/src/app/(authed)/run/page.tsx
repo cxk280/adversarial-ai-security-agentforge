@@ -34,14 +34,14 @@ const CATEGORIES = [
   { id: "denial_of_service_infinite_loops",        name: "DoS — infinite loops",                    seeds: 3,  sev: 4,  priority: null },
 ];
 
-// Only seeds-only is wired live today; the other two require the
-// RunPod mutator (huihui-ai 3B abl.) which is unavailable as of
-// 2026-05-12. Labeled as such so the picker isn't lying about what
-// will actually run.
+// RunPod mutator (huihui-ai 3B abl. via self-hosted /runsync) is now
+// online as of 2026-05-14, so seed-corpus dispatch and mutation-based
+// expansion are both wired live. Crescendo (multi-turn attack chains)
+// requires multi-turn dispatch in the harness which lands post-W3.
 const MODES = [
-  { id: "seeds",     name: "Seeds only",            desc: "Deterministic seed corpus, no mutator", available: true  },
-  { id: "tap",       name: "Seeds + mutation (TAP)", desc: "Requires RunPod mutator (unavailable)", available: false },
-  { id: "crescendo", name: "Crescendo multi-turn",   desc: "Requires RunPod mutator (unavailable)", available: false },
+  { id: "seeds",     name: "Seeds only",             desc: "Deterministic seed corpus, no mutator",                             available: true  },
+  { id: "tap",       name: "Seeds + mutation (TAP)", desc: "RunPod mutator extends each seed into N variants (ENABLE_MUTATIONS=1)", available: true  },
+  { id: "crescendo", name: "Crescendo multi-turn",   desc: "Requires multi-turn harness — post-W3",                              available: false },
 ];
 
 const SUITE_LIMIT = 60; // matches promotion-gate-v1.limit in service/runner.py
