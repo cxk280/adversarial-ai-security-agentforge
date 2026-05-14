@@ -62,16 +62,27 @@ CREATE TABLE IF NOT EXISTS regression_runs (
 );
 
 CREATE TABLE IF NOT EXISTS attempts (
-    attempt_id    TEXT PRIMARY KEY,
-    run_id        TEXT NOT NULL REFERENCES regression_runs(run_id),
-    seed_id       TEXT NOT NULL,
-    category      TEXT NOT NULL,
-    subcategory   TEXT NOT NULL,
-    verdict       TEXT NOT NULL,
-    response_text TEXT,
-    latency_ms    INTEGER,
-    spend_usd     REAL NOT NULL DEFAULT 0,
-    started_at    TEXT NOT NULL
+    attempt_id          TEXT PRIMARY KEY,
+    run_id              TEXT NOT NULL REFERENCES regression_runs(run_id),
+    seed_id             TEXT NOT NULL,
+    category            TEXT NOT NULL,
+    subcategory         TEXT NOT NULL,
+    verdict             TEXT NOT NULL,
+    response_text       TEXT,
+    latency_ms          INTEGER,
+    spend_usd           REAL NOT NULL DEFAULT 0,
+    started_at          TEXT NOT NULL,
+    -- Dual-judge breakdown — persisted so the run-detail UI can show
+    -- per-judge verdicts, agreement, and arbitrator escalation.
+    primary_verdict     TEXT,
+    primary_model       TEXT,
+    secondary_verdict   TEXT,
+    secondary_model     TEXT,
+    arbitrator_verdict  TEXT,
+    arbitrator_model    TEXT,
+    judges_agreed       INTEGER,
+    confidence          TEXT,
+    reason_code         TEXT
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -145,6 +156,15 @@ def init_db() -> None:
             "ALTER TABLE regression_runs ADD COLUMN langfuse_trace_url TEXT",
             "ALTER TABLE documentation_agent_outputs ADD COLUMN status TEXT NOT NULL DEFAULT 'completed'",
             "ALTER TABLE documentation_agent_outputs ADD COLUMN assigned_vuln_id TEXT",
+            "ALTER TABLE attempts ADD COLUMN primary_verdict TEXT",
+            "ALTER TABLE attempts ADD COLUMN primary_model TEXT",
+            "ALTER TABLE attempts ADD COLUMN secondary_verdict TEXT",
+            "ALTER TABLE attempts ADD COLUMN secondary_model TEXT",
+            "ALTER TABLE attempts ADD COLUMN arbitrator_verdict TEXT",
+            "ALTER TABLE attempts ADD COLUMN arbitrator_model TEXT",
+            "ALTER TABLE attempts ADD COLUMN judges_agreed INTEGER",
+            "ALTER TABLE attempts ADD COLUMN confidence TEXT",
+            "ALTER TABLE attempts ADD COLUMN reason_code TEXT",
         ):
             try:
                 conn.execute(ddl)
@@ -270,10 +290,18 @@ def insert_attempt(row: dict[str, Any]) -> None:
             """
             INSERT INTO attempts
                 (attempt_id, run_id, seed_id, category, subcategory, verdict,
-                 response_text, latency_ms, spend_usd, started_at)
+                 response_text, latency_ms, spend_usd, started_at,
+                 primary_verdict, primary_model,
+                 secondary_verdict, secondary_model,
+                 arbitrator_verdict, arbitrator_model,
+                 judges_agreed, confidence, reason_code)
             VALUES
                 (:attempt_id, :run_id, :seed_id, :category, :subcategory, :verdict,
-                 :response_text, :latency_ms, :spend_usd, :started_at)
+                 :response_text, :latency_ms, :spend_usd, :started_at,
+                 :primary_verdict, :primary_model,
+                 :secondary_verdict, :secondary_model,
+                 :arbitrator_verdict, :arbitrator_model,
+                 :judges_agreed, :confidence, :reason_code)
             """,
             row,
         )

@@ -510,6 +510,17 @@ async def _run_one(atk: Attack, executor, judge, run_id: str, run_tr=None):
         spend = 0.0
         rationale = ""
 
+        # Default judge breakdown fields — overwritten if LLM judge ran.
+        primary_verdict = None
+        primary_model = None
+        secondary_verdict = None
+        secondary_model = None
+        arbitrator_verdict = None
+        arbitrator_model = None
+        judges_agreed = None
+        confidence = None
+        reason_code = None
+
         # LLM Judge — if configured
         if judge is not None:
             try:
@@ -523,6 +534,16 @@ async def _run_one(atk: Attack, executor, judge, run_id: str, run_tr=None):
                 verdict = final.verdict
                 spend = final.total_usd
                 rationale = final.rationale
+                primary_verdict = final.primary.verdict
+                primary_model = final.primary.model
+                secondary_verdict = final.secondary.verdict
+                secondary_model = final.secondary.model
+                if final.arbitrator is not None:
+                    arbitrator_verdict = final.arbitrator.verdict
+                    arbitrator_model = final.arbitrator.model
+                judges_agreed = 1 if final.agreed else 0
+                confidence = final.confidence
+                reason_code = final.reason_code
                 log_judge_verdict(att_span, model=final.primary.model,
                                   verdict=final.primary.verdict,
                                   rationale=final.primary.rationale,
@@ -552,6 +573,15 @@ async def _run_one(atk: Attack, executor, judge, run_id: str, run_tr=None):
                 "latency_ms": result.latency_ms,
                 "spend_usd": spend,
                 "started_at": now_iso(),
+                "primary_verdict": primary_verdict,
+                "primary_model": primary_model,
+                "secondary_verdict": secondary_verdict,
+                "secondary_model": secondary_model,
+                "arbitrator_verdict": arbitrator_verdict,
+                "arbitrator_model": arbitrator_model,
+                "judges_agreed": judges_agreed,
+                "confidence": confidence,
+                "reason_code": reason_code,
             }
         )
         return spend, verdict

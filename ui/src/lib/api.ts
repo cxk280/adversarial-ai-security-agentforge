@@ -226,6 +226,15 @@ export interface Attempt {
   latency_ms: number;
   spend_usd: number;
   started_at: string;
+  primary_verdict?: "pass" | "fail" | "partial" | "inconclusive" | null;
+  primary_model?: string | null;
+  secondary_verdict?: "pass" | "fail" | "partial" | "inconclusive" | null;
+  secondary_model?: string | null;
+  arbitrator_verdict?: "pass" | "fail" | "partial" | "inconclusive" | null;
+  arbitrator_model?: string | null;
+  judges_agreed?: 0 | 1 | null;
+  confidence?: "high" | "medium" | "low" | null;
+  reason_code?: string | null;
 }
 
 export function listAttempts(runId: string): Promise<{ run_id: string; attempts: Attempt[]; count: number }> {
