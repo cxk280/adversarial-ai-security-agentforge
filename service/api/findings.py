@@ -229,18 +229,24 @@ def _exploit_findings_from_db(claimed_ids: set[str]) -> list[dict[str, Any]]:
     for r in rows:
         seed_id = r["seed_id"]
         # Fetch the most-recent passing attempt's run_id + response_text
+        # + the owning run's target_url so the finding carries the env
+        # it was discovered on (per-target filtering in the UI relies
+        # on this).
         with db.get_conn() as conn:
             latest = conn.execute(
                 """
-                SELECT run_id, response_text, started_at
-                FROM attempts
-                WHERE seed_id = ? AND verdict = 'pass'
-                ORDER BY started_at DESC
+                SELECT a.run_id, a.response_text, a.started_at,
+                       rr.target_url AS target_url
+                FROM attempts a
+                LEFT JOIN regression_runs rr ON rr.run_id = a.run_id
+                WHERE a.seed_id = ? AND a.verdict = 'pass'
+                ORDER BY a.started_at DESC
                 LIMIT 1
                 """,
                 (seed_id,),
             ).fetchone()
         resp_text = (latest["response_text"] if latest else "") or ""
+        target_url = (latest["target_url"] if latest else "") or ""
 
         doc = doc_outputs.get(seed_id)
         doc_status = (doc or {}).get("status", "absent")  # absent / in_progress / completed / failed
@@ -303,7 +309,7 @@ def _exploit_findings_from_db(claimed_ids: set[str]) -> list[dict[str, Any]]:
             "category": r["category"],
             "subcategory": r["subcategory"],
             "discovered": r["first_seen"],
-            "target": "",
+            "target": target_url,
             "attack_id": seed_id,
             "campaign_id": latest["run_id"] if latest else "",
             "threat_model_ref": "",
