@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useFindings } from "@/hooks/use-runs";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 
 const NAV = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -30,14 +31,20 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { data: findingsData } = useFindings();
+  const { target } = useTarget();
 
-  // Sidebar badge: count of findings that are open or in-progress.
+  // Sidebar badge: count of findings that are open or in-progress on
+  // the currently-selected target. Mirrors the per-env filter every
+  // other page applies — switching target in the TopBar should make
+  // the badge update.
   // Documentation-Agent-in-progress AUTO-* entries are status='open'
   // already, so they naturally tick the counter up while Sonnet is
   // generating their writeup. The dot-pulse below makes that state
   // extra-visible so the demo viewer can tell "something new just
   // landed."
-  const findings = findingsData?.findings ?? [];
+  const findings = (findingsData?.findings ?? []).filter((f) =>
+    matchesTarget(f.target, target),
+  );
   const openCount = findings.filter(
     (f) => f.status === "open" || f.status === "in_progress",
   ).length;
