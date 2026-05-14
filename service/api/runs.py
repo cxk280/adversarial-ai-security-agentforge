@@ -206,11 +206,11 @@ async def ping_target(
     The probe is intentionally lightweight — a single GET on /health
     with a short timeout. Returns the round-trip time, status code,
     and a fresh ISO timestamp so the UI can render "live now"."""
-    from harness.allowlist import assert_allowed, TargetNotAllowedError  # local import
+    from harness.allowlist import check_url, TargetNotAllowedError  # local import
     import httpx
     target_url = (url or "https://copilot-agent-dev.up.railway.app").rstrip("/")
     try:
-        assert_allowed(target_url)
+        check_url(target_url)
     except TargetNotAllowedError as exc:
         raise HTTPException(403, f"target not allowlisted: {exc}")
     started = datetime.now(timezone.utc)
