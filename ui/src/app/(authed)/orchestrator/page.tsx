@@ -67,7 +67,7 @@ export default function OrchestratorPage() {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb="Orchestrator" target="copilot-agent-dev" />
+      <TopBar crumb="Orchestrator" />
       <div className="space-y-5 px-8 py-6">
         <div className="flex items-start justify-between">
           <div>

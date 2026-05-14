@@ -17,7 +17,7 @@ export default function FindingsPage() {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb="Findings" target="copilot-agent-dev" />
+      <TopBar crumb="Findings" />
       <div className="space-y-5 px-8 py-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold text-slate-900">Findings</h1>

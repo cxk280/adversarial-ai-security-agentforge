@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
@@ -8,18 +8,7 @@ import { submitRun, type Attempt } from "@/lib/api";
 import { useAttempts, useRun, useCancelRun } from "@/hooks/use-runs";
 import { useActiveRunId } from "@/lib/use-active-run-id";
 import { usd } from "@/lib/format";
-
-const TARGETS = [
-  { id: "dev",  name: "dev",  url: "copilot-agent-dev.up.railway.app",        badge: null },
-  { id: "qa",   name: "qa",   url: "copilot-agent-qa.up.railway.app",         badge: null },
-  { id: "prod", name: "prod", url: "copilot-agent-production-41de.up.railway.app", badge: "ELEVATED" },
-];
-
-const TARGET_URL: Record<string, string> = {
-  dev:  "https://copilot-agent-dev.up.railway.app",
-  qa:   "https://copilot-agent-qa.up.railway.app",
-  prod: "https://copilot-agent-production-41de.up.railway.app",
-};
+import { useTarget } from "@/lib/target-context";
 
 // id = seed directory under evals/seeds/. Sent to the backend on
 // Launch so the user's checkbox selection actually drives what runs.
@@ -57,7 +46,9 @@ const MODES = [
 const SUITE_LIMIT = 60; // matches promotion-gate-v1.limit in service/runner.py
 
 export default function RunPage() {
-  const [target, setTarget] = useState("dev");
+  // Target is read from the global TopBar dropdown — no duplicate
+  // picker in the page body. See project_w3_target_selection_redundant.
+  const { target } = useTarget();
   // Start with NO categories pre-selected so the user explicitly
   // picks their attack surface for this run.
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -100,7 +91,7 @@ export default function RunPage() {
     setLaunching(true);
     try {
       const resp = await submitRun({
-        target_url: TARGET_URL[target],
+        target_url: target.url,
         suite_ref: "promotion-gate-v1",
         source: "manual",
         max_seconds: estMin * 60 * 2,
@@ -108,15 +99,27 @@ export default function RunPage() {
         categories: [...selected],
       });
       setActiveRunId(resp.run_id);
+      // Do NOT clear `launching` here. Keep the CTA in its "Launching…"
+      // state until useRun's polling has caught up and reports
+      // running/queued — otherwise the button flickers back to
+      // "Launch campaign" for one render before flipping to "Running…".
     } catch (e) {
       setLaunchError(e instanceof Error ? e.message : "Launch failed");
-    } finally {
       setLaunching(false);
     }
   };
 
   const isRunning =
     runData?.state === "running" || runData?.state === "queued";
+
+  // Once useRun reports running/queued, clear the local launching flag.
+  // Combined with the lingering `launching=true` above, this guarantees
+  // the CTA goes Launch → Launching… → Running… with no regression.
+  useEffect(() => {
+    if (isRunning && launching) {
+      setLaunching(false);
+    }
+  }, [isRunning, launching]);
   const isDone =
     runData?.state === "completed" || runData?.state === "failed" || runData?.state === "cancelled";
   const isCancelled = runData?.state === "cancelled";
@@ -156,7 +159,7 @@ export default function RunPage() {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb="Ad Hoc Run" target="copilot-agent-dev" />
+      <TopBar crumb="Ad Hoc Run" />
       <div className="space-y-5 px-8 py-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Ad hoc adversarial run</h1>
@@ -168,42 +171,24 @@ export default function RunPage() {
         <div className="grid grid-cols-[3fr_2fr] gap-5">
           {/* Form */}
           <section className="space-y-5 rounded-xl border border-slate-200 bg-white px-6 py-5">
-            <FieldGroup label="Target">
-              <div className="flex gap-3">
-                {TARGETS.map((t) => (
-                  <button
-                    key={t.id}
-                    type="button"
-                    onClick={() => setTarget(t.id)}
-                    disabled={!!activeRunId && isRunning}
-                    className={cn(
-                      "flex flex-1 flex-col gap-1.5 rounded-lg border-2 px-3.5 py-3 text-left",
-                      target === t.id
-                        ? "border-teal-600 bg-teal-50/50"
-                        : "border-slate-200 bg-white hover:border-slate-300",
-                      activeRunId && isRunning ? "opacity-60" : "",
-                    )}
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={cn(
-                        "h-2 w-2 rounded-full",
-                        t.id === "prod" ? "bg-orange-500" : "bg-green-500",
-                      )} />
-                      <span className={cn(
-                        "text-sm font-bold",
-                        target === t.id ? "text-teal-700" : "text-slate-900",
-                      )}>{t.name}</span>
-                      {t.badge && (
-                        <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">
-                          {t.badge}
-                        </span>
-                      )}
-                    </div>
-                    <div className="truncate text-[11px] text-slate-500">{t.url}</div>
-                  </button>
-                ))}
-              </div>
-            </FieldGroup>
+            <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-amber-50/30 px-3.5 py-2.5 text-xs">
+              <span className="font-medium text-slate-600">
+                Target (set in top-bar):
+              </span>
+              <span className="flex items-center gap-2">
+                <span className={cn(
+                  "h-2 w-2 rounded-full",
+                  target.id === "prod" ? "bg-orange-500" : "bg-green-500",
+                )} />
+                <span className="font-semibold text-slate-900">{target.label}</span>
+                {target.badge && (
+                  <span className="rounded bg-orange-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-orange-700">
+                    {target.badge}
+                  </span>
+                )}
+                <code className="text-[10px] text-slate-500">{target.host}</code>
+              </span>
+            </div>
 
             <FieldGroup label="Attack Categories">
               <div className="space-y-2">
@@ -433,20 +418,14 @@ function LiveStream({
 }) {
   if (!activeRunId) {
     return (
-      <div className="space-y-2 px-5 py-4 text-xs">
-        {[
-          ["WAITING", "Awaiting launch…"],
-          ["PREVIEW", "Attacks dispatch against /chat with session_id=adv-<uuid>"],
-          ["PREVIEW", "Each (attack, response) scored by Primary + Secondary judges; arbitrator on disagreement"],
-          ["PREVIEW", "Verdicts stream here as attempts complete; click any row to jump to /runs/<campaign_id>"],
-        ].map(([tag, text], i) => (
-          <div key={i} className="flex items-start gap-2">
-            <span className="rounded border border-slate-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-slate-500">
-              {tag}
-            </span>
-            <span className="text-slate-600">{text}</span>
-          </div>
-        ))}
+      <div className="flex flex-col items-center justify-center gap-2 px-5 py-10 text-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full border-2 border-dashed border-slate-300 text-slate-400">
+          ▶
+        </div>
+        <div className="text-sm font-medium text-slate-700">No run in progress</div>
+        <div className="max-w-[18rem] text-[11px] text-slate-500">
+          Pick attack categories on the left and click <span className="font-semibold">Launch campaign</span>. Verdicts stream here as attempts complete.
+        </div>
       </div>
     );
   }

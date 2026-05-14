@@ -19,7 +19,7 @@ export default function FindingDetailPage({ params }: PageProps) {
   if (isLoading) {
     return (
       <div className="-mx-8 -my-6">
-        <TopBar crumb={`Findings · ${id}`} target="copilot-agent-dev" />
+        <TopBar crumb={`Findings · ${id}`} />
         <div className="px-8 py-10 text-sm text-slate-500">Loading {id}…</div>
       </div>
     );
@@ -28,7 +28,7 @@ export default function FindingDetailPage({ params }: PageProps) {
   if (error || !finding) {
     return (
       <div className="-mx-8 -my-6">
-        <TopBar crumb={`Findings · ${id}`} target="copilot-agent-dev" />
+        <TopBar crumb={`Findings · ${id}`} />
         <div className="space-y-3 px-8 py-10">
           <p className="text-sm text-red-600">
             Couldn&apos;t load {id} — no markdown file at findings/{id}.md.
@@ -46,7 +46,7 @@ export default function FindingDetailPage({ params }: PageProps) {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb={`Findings · ${finding.id}`} target="copilot-agent-dev" />
+      <TopBar crumb={`Findings · ${finding.id}`} />
       <div className="space-y-5 px-8 py-6">
         <Link
           href="/findings"

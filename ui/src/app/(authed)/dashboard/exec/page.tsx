@@ -153,7 +153,7 @@ export default function ExecPage() {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb="Executive View" target="copilot-agent-dev" />
+      <TopBar crumb="Executive View" />
       <div className="space-y-5 px-8 py-6">
         <div className="flex items-start justify-between">
           <div>

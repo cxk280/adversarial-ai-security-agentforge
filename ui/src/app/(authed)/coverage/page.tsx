@@ -107,7 +107,7 @@ export default function CoveragePage() {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb="Coverage" target="copilot-agent-dev" />
+      <TopBar crumb="Coverage" />
       <div className="space-y-5 px-8 py-6">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Coverage matrix</h1>

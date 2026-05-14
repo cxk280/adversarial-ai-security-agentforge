@@ -17,7 +17,7 @@ export default function RunsHistoryPage() {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar crumb="Run History" target="copilot-agent-dev" />
+      <TopBar crumb="Run History" />
       <div className="space-y-5 px-8 py-6">
         <div className="space-y-1">
           <h1 className="text-2xl font-bold text-slate-900">Run history</h1>

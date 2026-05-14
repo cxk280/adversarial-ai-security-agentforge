@@ -26,14 +26,7 @@ export default function RunDetailPage({ params }: PageProps) {
 
   return (
     <div className="-mx-8 -my-6">
-      <TopBar
-        crumb={`Run History · ${id.slice(0, 22)}…`}
-        target={
-          run?.target_url
-            ?.replace(/^https?:\/\//, "")
-            ?.replace(/\.up\.railway\.app$/, "") ?? "copilot-agent-dev"
-        }
-      />
+      <TopBar crumb={`Run History · ${id.slice(0, 22)}…`} />
       <div className="space-y-5 px-8 py-6">
         <Link
           href="/runs"
