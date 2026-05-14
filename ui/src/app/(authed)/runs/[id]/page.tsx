@@ -6,7 +6,8 @@ import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
 import { useAttempts, useRun } from "@/hooks/use-runs";
-import type { Attempt } from "@/lib/api";
+import { fetchRunArtifact, type Attempt } from "@/lib/api";
+import { useState } from "react";
 
 // Fallback host — used only when the API didn't return a deep link
 // (older runs from before the per-run trace URL was captured).
@@ -123,6 +124,8 @@ export default function RunDetailPage({ params }: PageProps) {
           <span className="text-slate-500">
             attempts table on adversary-db / SHA {run?.target_sha ?? "—"}
           </span>
+          <span className="text-slate-400">·</span>
+          <ArtifactDownload runId={id} />
         </div>
 
         {/* Attempts table */}
@@ -216,6 +219,53 @@ function Stat({ label, value, color }: { label: string; value: string; color: st
       <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">{label}</div>
       <div className={cn("mt-1 text-2xl font-bold", color)}>{value}</div>
     </div>
+  );
+}
+
+/**
+ * Download the run's full eval artifact (metadata + attempts + judge
+ * votes) as JSON. Reproducible: another instance can hash this and
+ * verify identical seed corpus + same judges → same verdicts.
+ */
+function ArtifactDownload({ runId }: { runId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const onClick = async () => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const data = await fetchRunArtifact(runId);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${runId}.artifact.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Failed to fetch artifact");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span className="inline-flex items-center gap-2">
+      <span className="font-semibold text-slate-700">Eval artifact:</span>
+      <button
+        type="button"
+        onClick={onClick}
+        disabled={busy}
+        className="text-teal-600 hover:underline disabled:opacity-60"
+        title="Download JSON of run + attempts + per-judge verdicts. Reproducible across runs of the same seed corpus on the same target."
+      >
+        {busy ? "Downloading…" : "Download JSON →"}
+      </button>
+      {err && <span className="text-red-600">({err})</span>}
+    </span>
   );
 }
 

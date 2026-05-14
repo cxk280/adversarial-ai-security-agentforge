@@ -2,6 +2,7 @@
 
 import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { submitRun, type Attempt } from "@/lib/api";
@@ -49,9 +50,19 @@ export default function RunPage() {
   // Target is read from the global TopBar dropdown — no duplicate
   // picker in the page body. See project_w3_target_selection_redundant.
   const { target } = useTarget();
-  // Start with NO categories pre-selected so the user explicitly
-  // picks their attack surface for this run.
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const searchParams = useSearchParams();
+
+  // Start with NO categories pre-selected — UNLESS the user landed on
+  // /run with a ?categories=a,b,c query param. Coverage's "Re-run gaps"
+  // CTA does exactly that, deep-linking the user back to /run with the
+  // highest-priority untested / failing subcategories pre-checked.
+  const [selected, setSelected] = useState<Set<string>>(() => {
+    const param = searchParams?.get("categories");
+    if (!param) return new Set();
+    const valid = new Set(CATEGORIES.map((c) => c.id));
+    const ids = param.split(",").map((s) => s.trim()).filter((s) => valid.has(s));
+    return new Set(ids);
+  });
   const [mode, setMode] = useState("seeds");
   // Reset the default selection to the 4 top-priority categories from
   // the new 17-category lineup.

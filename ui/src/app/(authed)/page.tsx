@@ -1,12 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { TopBar } from "@/components/top-bar";
 import { KpiCard } from "@/components/kpi-card";
 import { FindingRow } from "@/components/finding-row";
 import { RecentRunsCard } from "@/components/recent-runs-card";
 import { useFindings, useRuns, useCoverage } from "@/hooks/use-runs";
 import { relativeTime, usd } from "@/lib/format";
+import { pingTarget, type TargetPing } from "@/lib/api";
+import { useTarget } from "@/lib/target-context";
+import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
   const { data: findingsData } = useFindings();
@@ -67,9 +70,12 @@ export default function DashboardPage() {
     <div className="-mx-8 -my-6">
       <TopBar crumb="Dashboard" />
       <div className="space-y-5 px-8 py-6">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold text-slate-900">Security posture overview</h1>
-          <p className="text-sm text-slate-600">{lastDescriptor}</p>
+        <div className="flex items-start justify-between gap-4">
+          <div className="space-y-1">
+            <h1 className="text-2xl font-bold text-slate-900">Security posture overview</h1>
+            <p className="text-sm text-slate-600">{lastDescriptor}</p>
+          </div>
+          <TargetPingWidget />
         </div>
 
         <div className="grid grid-cols-4 gap-4">
@@ -168,6 +174,88 @@ export default function DashboardPage() {
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Live probe of the currently-selected target's /health endpoint.
+ * Visible proof that the platform is actually reaching the
+ * Co-Pilot — defends against the "are you sure this isn't all
+ * cached attempts?" question.
+ *
+ * Re-probes every 30s while the page is mounted, and on every
+ * target change in the TopBar dropdown.
+ */
+function TargetPingWidget() {
+  const { target } = useTarget();
+  const [ping, setPing] = useState<TargetPing | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const probe = async () => {
+    setBusy(true);
+    try {
+      setPing(await pingTarget(target.url));
+    } catch {
+      setPing({
+        target_url: target.url,
+        ok: false,
+        status_code: null,
+        latency_ms: null,
+        checked_at: new Date().toISOString(),
+        error: "probe failed",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    void probe();
+    const id = setInterval(probe, 30_000);
+    return () => clearInterval(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target.url]);
+
+  const status = ping?.ok
+    ? "live"
+    : ping
+      ? "unreachable"
+      : "probing";
+
+  return (
+    <button
+      type="button"
+      onClick={probe}
+      disabled={busy}
+      title={`Probes ${target.url}/health. Click to re-check.`}
+      className={cn(
+        "shrink-0 rounded-lg border px-3 py-2 text-left text-[11px] hover:bg-slate-50 disabled:opacity-60",
+        ping?.ok ? "border-green-200 bg-green-50/40"
+          : ping ? "border-red-200 bg-red-50/40"
+          : "border-slate-200 bg-white",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "h-2 w-2 rounded-full",
+            status === "live" ? "animate-pulse bg-green-500"
+              : status === "unreachable" ? "bg-red-500"
+              : "bg-slate-400",
+          )}
+        />
+        <span className="font-bold uppercase tracking-wide text-slate-600">
+          Target {status}
+        </span>
+      </div>
+      <div className="text-slate-500">
+        {ping?.ok && ping.latency_ms != null
+          ? `${ping.latency_ms} ms · ${relativeTime(ping.checked_at)}`
+          : ping?.checked_at
+            ? `last check ${relativeTime(ping.checked_at)}`
+            : "probing…"}
+      </div>
+    </button>
   );
 }
 

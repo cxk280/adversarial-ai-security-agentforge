@@ -241,6 +241,28 @@ export function listAttempts(runId: string): Promise<{ run_id: string; attempts:
   return request(`/regression-runs/${encodeURIComponent(runId)}/attempts`);
 }
 
+/** Reproducible eval artifact: run metadata + every attempt with full
+ * judge breakdown. Designed to be saved to disk by the UI. */
+export function fetchRunArtifact(runId: string): Promise<unknown> {
+  return request(`/regression-runs/${encodeURIComponent(runId)}/artifact`);
+}
+
+export interface TargetPing {
+  target_url: string;
+  ok: boolean;
+  status_code: number | null;
+  latency_ms: number | null;
+  checked_at: string;
+  error?: string;
+}
+
+/** Live probe of the target Co-Pilot's /health endpoint. The dashboard
+ * pings this to display a visible proof of live connectivity. */
+export function pingTarget(url?: string): Promise<TargetPing> {
+  const q = url ? `?url=${encodeURIComponent(url)}` : "";
+  return request(`/target/ping${q}`);
+}
+
 
 // ─── Coverage (subcategory-level aggregates) ──────────────────
 

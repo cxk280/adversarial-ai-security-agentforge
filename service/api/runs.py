@@ -145,12 +145,95 @@ async def get_run_attempts(
     return {"run_id": run_id, "attempts": attempts, "count": len(attempts)}
 
 
+@router.get("/regression-runs/{run_id}/artifact")
+async def get_run_artifact(
+    run_id: str,
+    _token: str = Depends(require_bearer),
+) -> dict:
+    """Reproducible eval artifact bundle. One JSON blob containing the
+    run metadata, every attempt row (with full judge breakdown), and
+    the suite_ref / target_url that scoped the campaign — enough to
+    replay deterministically given the same seed corpus.
+
+    Designed for download via the Run Detail UI's "Download artifact"
+    CTA; opaque to humans, machine-parseable for diff'ing runs."""
+    row = db.get_run(run_id)
+    if row is None:
+        raise HTTPException(404, f"Run {run_id!r} not found")
+    attempts = db.list_attempts(run_id)
+    return {
+        "schema_version": 1,
+        "exported_at": now_iso(),
+        "run": {
+            "run_id": run_id,
+            "state": row["state"],
+            "target_url": row["target_url"],
+            "suite_ref": row["suite_ref"],
+            "commit_sha": row.get("commit_sha"),
+            "baseline_target_sha": row.get("baseline_target_sha"),
+            "source": row.get("source"),
+            "started_at": row["started_at"],
+            "ended_at": row.get("ended_at"),
+            "spend_usd": row.get("spend_usd", 0.0),
+            "totals": row.get("totals", {}),
+            "gate": row.get("gate", {}),
+            "langfuse_trace_url": row.get("langfuse_trace_url"),
+        },
+        "attempts": attempts,
+        "attempt_count": len(attempts),
+    }
+
+
 @router.get("/coverage")
 async def get_coverage(_token: str = Depends(require_bearer)) -> dict:
     """Per-(category, subcategory) attempt aggregates for the live Coverage
     matrix. The UI merges these with the static threat-model taxonomy so
     untested subcategories still appear, but tested ones get real numbers."""
     return {"rows": db.coverage_by_subcategory()}
+
+
+@router.get("/target/ping")
+async def ping_target(
+    url: str | None = None,
+    _token: str = Depends(require_bearer),
+) -> dict:
+    """Live target-connectivity probe. Dashboards surface this as a
+    visible proof that the platform is actually reaching the
+    Co-Pilot's /health endpoint, not just regurgitating cached
+    attempts. The reviewer's "tighten the proof around live target
+    connectivity" feedback maps to this widget.
+
+    The probe is intentionally lightweight — a single GET on /health
+    with a short timeout. Returns the round-trip time, status code,
+    and a fresh ISO timestamp so the UI can render "live now"."""
+    from harness.allowlist import assert_allowed, TargetNotAllowedError  # local import
+    import httpx
+    target_url = (url or "https://copilot-agent-dev.up.railway.app").rstrip("/")
+    try:
+        assert_allowed(target_url)
+    except TargetNotAllowedError as exc:
+        raise HTTPException(403, f"target not allowlisted: {exc}")
+    started = datetime.now(timezone.utc)
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{target_url}/health")
+        latency_ms = int((datetime.now(timezone.utc) - started).total_seconds() * 1000)
+        return {
+            "target_url": target_url,
+            "ok": resp.status_code == 200,
+            "status_code": resp.status_code,
+            "latency_ms": latency_ms,
+            "checked_at": now_iso(),
+        }
+    except httpx.HTTPError as exc:
+        return {
+            "target_url": target_url,
+            "ok": False,
+            "status_code": None,
+            "latency_ms": None,
+            "checked_at": now_iso(),
+            "error": str(exc),
+        }
 
 
 @router.post("/regression-runs/{run_id}/cancel")

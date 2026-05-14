@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { prettySnake, pct, relativeTime } from "@/lib/format";
@@ -8,33 +9,37 @@ import { useCoverage } from "@/hooks/use-runs";
 
 /** Static priority ranking from THREAT_MODEL.md. The 17 leaves never
  * change between runs; only the per-row stats do. We carry this table
- * here so untested subcategories still render with their priority. */
+ * here so untested subcategories still render with their priority.
+ * `seedId` is the directory name under evals/seeds/ — used to deep-link
+ * a "Re-run gaps" launch directly back to /run with the right
+ * subcategories pre-selected. */
 interface TaxonRow {
   rank: number;
   cat: string;
   sub: string;
   sev: number;
   pri: number;
+  seedId: string;
 }
 
 const TAXON: TaxonRow[] = [
-  { rank: 1,  cat: "data_exfiltration",          sub: "Authorization bypass",     sev: 9,  pri: 7.2 },
-  { rank: 2,  cat: "data_exfiltration",          sub: "Cross-patient leakage",    sev: 10, pri: 7.0 },
-  { rank: 3,  cat: "prompt_injection",           sub: "Indirect",                  sev: 9,  pri: 6.3 },
-  { rank: 4,  cat: "prompt_injection",           sub: "Multi-turn / crescendo",   sev: 8,  pri: 5.6 },
-  { rank: 5,  cat: "state_corruption",           sub: "History manipulation",     sev: 8,  pri: 5.6 },
-  { rank: 6,  cat: "data_exfiltration",          sub: "PHI leakage",              sev: 9,  pri: 5.4 },
-  { rank: 7,  cat: "identity_role_exploitation", sub: "Persona hijack",           sev: 10, pri: 5.0 },
-  { rank: 8,  cat: "tool_misuse",                sub: "Parameter tampering",      sev: 7,  pri: 4.9 },
-  { rank: 9,  cat: "identity_role_exploitation", sub: "Privilege escalation",     sev: 7,  pri: 4.9 },
-  { rank: 10, cat: "state_corruption",           sub: "Context poisoning",        sev: 7,  pri: 4.9 },
-  { rank: 11, cat: "identity_role_exploitation", sub: "Trust boundary violation", sev: 8,  pri: 4.8 },
-  { rank: 12, cat: "prompt_injection",           sub: "Direct",                   sev: 6,  pri: 4.8 },
-  { rank: 13, cat: "denial_of_service",          sub: "Token exhaustion",         sev: 5,  pri: 4.5 },
-  { rank: 14, cat: "denial_of_service",          sub: "Cost amplification",       sev: 5,  pri: 4.0 },
-  { rank: 15, cat: "tool_misuse",                sub: "Unintended invocation",    sev: 5,  pri: 3.5 },
-  { rank: 16, cat: "tool_misuse",                sub: "Recursive tool calls",     sev: 5,  pri: 3.5 },
-  { rank: 17, cat: "denial_of_service",          sub: "Infinite loops",           sev: 4,  pri: 2.8 },
+  { rank: 1,  cat: "data_exfiltration",          sub: "Authorization bypass",     sev: 9,  pri: 7.2, seedId: "data_exfil_authorization_bypass" },
+  { rank: 2,  cat: "data_exfiltration",          sub: "Cross-patient leakage",    sev: 10, pri: 7.0, seedId: "data_exfil_cross_patient" },
+  { rank: 3,  cat: "prompt_injection",           sub: "Indirect",                  sev: 9,  pri: 6.3, seedId: "prompt_injection_indirect" },
+  { rank: 4,  cat: "prompt_injection",           sub: "Multi-turn / crescendo",   sev: 8,  pri: 5.6, seedId: "prompt_injection_multi_turn" },
+  { rank: 5,  cat: "state_corruption",           sub: "History manipulation",     sev: 8,  pri: 5.6, seedId: "state_corruption_history_manipulation" },
+  { rank: 6,  cat: "data_exfiltration",          sub: "PHI leakage",              sev: 9,  pri: 5.4, seedId: "data_exfil_phi_leakage" },
+  { rank: 7,  cat: "identity_role_exploitation", sub: "Persona hijack",           sev: 10, pri: 5.0, seedId: "identity_role_persona_hijack" },
+  { rank: 8,  cat: "tool_misuse",                sub: "Parameter tampering",      sev: 7,  pri: 4.9, seedId: "tool_misuse_parameter_tampering" },
+  { rank: 9,  cat: "identity_role_exploitation", sub: "Privilege escalation",     sev: 7,  pri: 4.9, seedId: "identity_role_privilege_escalation" },
+  { rank: 10, cat: "state_corruption",           sub: "Context poisoning",        sev: 7,  pri: 4.9, seedId: "state_corruption_context_poisoning" },
+  { rank: 11, cat: "identity_role_exploitation", sub: "Trust boundary violation", sev: 8,  pri: 4.8, seedId: "identity_role_trust_boundary_violation" },
+  { rank: 12, cat: "prompt_injection",           sub: "Direct",                   sev: 6,  pri: 4.8, seedId: "prompt_injection_direct" },
+  { rank: 13, cat: "denial_of_service",          sub: "Token exhaustion",         sev: 5,  pri: 4.5, seedId: "denial_of_service_token_exhaustion" },
+  { rank: 14, cat: "denial_of_service",          sub: "Cost amplification",       sev: 5,  pri: 4.0, seedId: "denial_of_service_cost_amplification" },
+  { rank: 15, cat: "tool_misuse",                sub: "Unintended invocation",    sev: 5,  pri: 3.5, seedId: "tool_misuse_unintended_invocation" },
+  { rank: 16, cat: "tool_misuse",                sub: "Recursive tool calls",     sev: 5,  pri: 3.5, seedId: "tool_misuse_recursive_tool_calls" },
+  { rank: 17, cat: "denial_of_service",          sub: "Infinite loops",           sev: 4,  pri: 2.8, seedId: "denial_of_service_infinite_loops" },
 ];
 
 type RowState = "untested" | "red" | "orange" | "green";
@@ -105,15 +110,44 @@ export default function CoveragePage() {
   const untested = rows.length - tested;
   const withExploits = rows.filter((r) => r.exploits > 0).length;
 
+  // Subcategories that need testing again, ranked by THREAT_MODEL
+  // priority. "Gaps" = untested + any with confirmed exploits (which
+  // need re-validation after remediation) + any with sub-95% pass rate
+  // (orange state). Limited to top 8 to keep the campaign within the
+  // 60-attack suite cap.
+  const gapSeeds = useMemo(() => {
+    const gaps = rows
+      .filter((r) => r.state !== "green")
+      .sort((a, b) => b.pri - a.pri)
+      .slice(0, 8)
+      .map((r) => r.seedId);
+    return gaps;
+  }, [rows]);
+
+  const gapsQuery = gapSeeds.length > 0
+    ? `?categories=${encodeURIComponent(gapSeeds.join(","))}`
+    : "";
+
   return (
     <div className="-mx-8 -my-6">
       <TopBar crumb="Coverage" />
       <div className="space-y-5 px-8 py-6">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">Coverage matrix</h1>
-          <p className="text-sm text-slate-600">
-            {rows.length} ranked subcategories from THREAT_MODEL.md &nbsp;·&nbsp; {tested} tested &nbsp;·&nbsp; {untested} untested &nbsp;·&nbsp; {withExploits} with confirmed exploits
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">Coverage matrix</h1>
+            <p className="text-sm text-slate-600">
+              {rows.length} ranked subcategories from THREAT_MODEL.md &nbsp;·&nbsp; {tested} tested &nbsp;·&nbsp; {untested} untested &nbsp;·&nbsp; {withExploits} with confirmed exploits
+            </p>
+          </div>
+          {gapSeeds.length > 0 && (
+            <Link
+              href={`/run${gapsQuery}`}
+              className="shrink-0 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-700"
+              title={`Pre-selects ${gapSeeds.length} highest-priority gap subcategories on /run`}
+            >
+              Re-run {gapSeeds.length} gaps →
+            </Link>
+          )}
         </div>
 
         <section className="rounded-xl border border-slate-200 bg-white">
