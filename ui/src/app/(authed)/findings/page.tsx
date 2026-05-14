@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { SeverityBadge } from "@/components/severity-badge";
@@ -7,9 +8,36 @@ import { StatusPill } from "@/components/status-pill";
 import { relativeTime } from "@/lib/format";
 import { useFindings } from "@/hooks/use-runs";
 
+/**
+ * Sort key: open findings first (ascending VULN-NNNN), then in_progress,
+ * then resolved (also ascending VULN-NNNN within each bucket).
+ * Anything we can't parse as VULN-NNNN sorts last (preserves insertion
+ * order for those — extremely rare; only happens when a finding id
+ * doesn't follow the canonical VULN-NNNN shape).
+ */
+const STATUS_RANK: Record<string, number> = {
+  open: 0,
+  in_progress: 1,
+  draft: 1,
+  resolved: 2,
+};
+
+function _vulnNum(id: string): number {
+  const m = id.match(/^VULN-(\d+)/);
+  return m ? parseInt(m[1], 10) : Number.MAX_SAFE_INTEGER;
+}
+
 export default function FindingsPage() {
   const { data, isLoading, error } = useFindings();
-  const findings = data?.findings ?? [];
+  const findings = useMemo(() => {
+    const raw = data?.findings ?? [];
+    return [...raw].sort((a, b) => {
+      const sa = STATUS_RANK[a.status] ?? 99;
+      const sb = STATUS_RANK[b.status] ?? 99;
+      if (sa !== sb) return sa - sb;
+      return _vulnNum(a.id) - _vulnNum(b.id);
+    });
+  }, [data]);
 
   const open = findings.filter((f) => f.status === "open").length;
   const inProg = findings.filter((f) => f.status === "in_progress").length;
