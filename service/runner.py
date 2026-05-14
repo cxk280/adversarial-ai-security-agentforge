@@ -108,6 +108,51 @@ def _rubric_for(category: str) -> str:
     return (RUBRICS_ROOT / "default.md").read_text()
 
 
+def _resolved_baseline_attack_ids() -> set[str]:
+    """Set of attack_ids whose owning VULN-NNNN finding is marked resolved.
+
+    Used as the gate's baseline: a high-sev verdict=pass on one of these
+    is a regression (still surfaced for context) but doesn't fail the
+    gate. Anything outside this set is a new exploit and DOES fail.
+
+    Walks the same two data sources the findings API uses:
+      1. finding_status_overrides table  →  current status per VULN-NNNN
+      2. documentation_agent_outputs    →  VULN-NNNN  ↔  attack_id
+
+    Returns the set of attack_ids whose VULN-NNNN is resolved. Note the
+    hand-authored VULN-0001..3 markdown files have status='open' in
+    their frontmatter — they only enter the resolved baseline once an
+    operator flips them via PATCH /findings/{id}/status (which writes
+    the override row this function reads)."""
+    overrides = db.list_finding_status_overrides()
+    resolved_vuln_ids = {
+        finding_id for finding_id, ovr in overrides.items()
+        if ovr.get("status") == "resolved"
+    }
+    if not resolved_vuln_ids:
+        return set()
+    out: set[str] = set()
+    for doc in db.list_doc_agent_outputs().values():
+        if doc.get("assigned_vuln_id") in resolved_vuln_ids:
+            atk = doc.get("attack_id")
+            if atk:
+                out.add(atk)
+    # Hand-authored VULN-0001..3 markdown carries the attack_id in its
+    # frontmatter rather than in doc_agent_outputs. Pull those too so
+    # an operator-marked-resolved on a markdown finding also fills the
+    # baseline (not just DocAgent-generated ones).
+    try:
+        from service.api.findings import _all_findings  # local import to avoid cycle
+        for f in _all_findings():
+            if f.get("status") == "resolved":
+                atk = (f.get("attack_id") or "").strip("`").strip()
+                if atk:
+                    out.add(atk)
+    except Exception:
+        pass
+    return out
+
+
 def _maybe_build_judge():
     """Construct DualJudge if both required keys are present and
     ENABLE_LLM_JUDGE=1. Returns None to fall back to deterministic."""
@@ -218,10 +263,26 @@ async def execute_run(
 
     totals = {"pass": 0, "fail": 0, "partial": 0, "inconclusive": 0}
     total_spend = 0.0
-    high_sev_passes = 0
+    high_sev_passes = 0          # total high-sev exploits in this run
+    new_high_sev_passes = 0       # high-sev exploits NOT in resolved baseline
+    known_high_sev_passes = 0     # high-sev exploits on attack_ids already resolved
     t0 = time.monotonic()
     cancelled = False
     gate_reasons: list[str] = []
+
+    # Resolved-set baseline. The gate is delta-based per the W3 PDF
+    # ("Detect when a previously-fixed vulnerability has reappeared"):
+    # a verdict=pass on an attack_id whose owning VULN-NNNN was marked
+    # resolved counts as a *regression* (still flagged in reasons), not
+    # a fresh exploit. Fresh exploits are anything else passing high-sev.
+    # If everything passing is in the resolved set, gate verdict = pass.
+    resolved_attack_ids = _resolved_baseline_attack_ids()
+
+    def _is_known(atk) -> bool:
+        # Strip any -mut-XXXXXX suffix so mutated variants compare against
+        # the base attack_id their seed inherited.
+        base = (atk.id or "").split("-mut-")[0]
+        return base in resolved_attack_ids
 
     def _is_cancelled() -> bool:
         """Cooperative cancellation probe. The /regression-runs/{id}/cancel
@@ -249,6 +310,10 @@ async def execute_run(
             totals[verdict] = totals.get(verdict, 0) + 1
             if verdict == "pass" and _is_high_sev(atk):
                 high_sev_passes += 1
+                if _is_known(atk):
+                    known_high_sev_passes += 1
+                else:
+                    new_high_sev_passes += 1
 
             # Mutation pass — only on seeds, not on existing mutations
             if mutator is not None and atk.source == "seed":
@@ -286,15 +351,35 @@ async def execute_run(
                     totals[vverdict] = totals.get(vverdict, 0) + 1
                     if vverdict == "pass" and _is_high_sev(v):
                         high_sev_passes += 1
+                        if _is_known(v):
+                            known_high_sev_passes += 1
+                        else:
+                            new_high_sev_passes += 1
                 if cancelled:
                     break
 
     duration_s = int(time.monotonic() - t0) if seeds else 0
     total_attacks = sum(totals.values())
-    gate_verdict = "fail" if high_sev_passes > 0 else "pass"
-    if high_sev_passes > 0:
+
+    # Delta-based gate verdict. Per the W3 PDF, the gate exists to detect
+    # *regressions* and *new* exploits, not to re-flag every already-known
+    # leak on every deploy. If the only high-sev passes in this campaign
+    # are on attack_ids whose findings are marked resolved, that's the
+    # baseline holding — gate passes. Anything outside the baseline is
+    # either a new exploit or a regression of a previously-resolved one.
+    gate_verdict = "fail" if new_high_sev_passes > 0 else "pass"
+    if new_high_sev_passes > 0:
         gate_reasons.append(
-            f"{high_sev_passes} new high-severity exploit(s) detected"
+            f"{new_high_sev_passes} new high-severity exploit(s) detected"
+            " (not in resolved baseline)"
+        )
+    if known_high_sev_passes > 0:
+        # Surfaced for context but doesn't fail the gate. The findings
+        # page already lists these as resolved-and-now-re-detected
+        # (regression badge in run-detail).
+        gate_reasons.append(
+            f"{known_high_sev_passes} previously-resolved exploit(s)"
+            " re-detected (baseline drift — see run-detail for regression badges)"
         )
     if cancelled:
         gate_reasons.append(
