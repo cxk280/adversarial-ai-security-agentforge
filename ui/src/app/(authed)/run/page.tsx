@@ -108,12 +108,19 @@ function RunPageInner() {
     (sum, c) => sum + c.seeds,
     0,
   );
+  // Mutation multiplier mirrors the deployed agent's N_MUTATIONS=2:
+  // each seed expands to (1 + N) attempts when TAP is selected
+  // (original + N mutator-generated variants). Seeds-only stays 1×.
+  // Crescendo isn't wired yet — falls back to seeds-only count.
+  const N_MUTATIONS = 2;
+  const mutationMultiplier = mode === "tap" ? 1 + N_MUTATIONS : 1;
+  const totalAttackEstimate = totalSeeds * mutationMultiplier;
   // The backend caps any single campaign at SUITE_LIMIT (60) attempts
-  // regardless of how many seeds the selection holds. Reflect that in
-  // the preview so the user isn't told to expect more attacks than
-  // will actually dispatch.
-  const estCycles = Math.min(totalSeeds, SUITE_LIMIT);
-  const capped = totalSeeds > SUITE_LIMIT;
+  // regardless of how many seeds × mutations the selection holds.
+  // Reflect that in the preview so the user isn't told to expect
+  // more attacks than will actually dispatch.
+  const estCycles = Math.min(totalAttackEstimate, SUITE_LIMIT);
+  const capped = totalAttackEstimate > SUITE_LIMIT;
   const estUsd = (estCycles * 0.014).toFixed(2);
   const estMin = Math.max(2, Math.round(estCycles * 0.08));
 
@@ -298,7 +305,15 @@ function RunPageInner() {
             <FieldGroup label="Budget & Limits">
               <div className="grid grid-cols-4 gap-3">
                 <BudgetField label="USD CAP" value="$1.00" hint="of $5.00 daily" />
-                <BudgetField label="MAX CASES" value={String(Math.max(estCycles, 5))} hint={`${totalSeeds} seeds × ~3 mut.`} />
+                <BudgetField
+                  label="MAX CASES"
+                  value={String(Math.max(estCycles, 5))}
+                  hint={
+                    mode === "tap"
+                      ? `${totalSeeds} seeds × ${1 + N_MUTATIONS} (orig + ${N_MUTATIONS} mut.)`
+                      : `${totalSeeds} seeds`
+                  }
+                />
                 <BudgetField label="PER-CALL TIMEOUT" value="30 s" />
                 <BudgetField label="RUN DEADLINE" value={`${estMin} min`} />
               </div>
@@ -359,9 +374,14 @@ function RunPageInner() {
               <div className="mt-2 text-xl font-bold">
                 ≈ {estCycles} attacks &nbsp;·&nbsp; ≈ {estMin} min &nbsp;·&nbsp; ≈ ${estUsd}
               </div>
+              {mode === "tap" && totalSeeds > 0 && (
+                <div className="mt-1 text-[11px] text-teal-300">
+                  {totalSeeds} seeds × {1 + N_MUTATIONS} (1 original + {N_MUTATIONS} mutator variants) = {totalAttackEstimate} planned
+                </div>
+              )}
               {capped && (
                 <div className="mt-1 text-[11px] font-semibold text-orange-300">
-                  Selection has {totalSeeds} seeds; campaign caps at {SUITE_LIMIT} attacks (suite limit).
+                  {totalAttackEstimate} attacks planned; campaign caps at {SUITE_LIMIT} (suite limit).
                 </div>
               )}
               <div className="mt-3 space-y-1 text-xs text-slate-300">
