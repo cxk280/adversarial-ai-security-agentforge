@@ -118,19 +118,26 @@ export default function CoveragePage() {
   // Subcategories that need testing again, ranked by THREAT_MODEL
   // priority. "Gaps" = untested + any with confirmed exploits (which
   // need re-validation after remediation) + any with sub-95% pass rate
-  // (orange state). Limited to top 8 to keep the campaign within the
-  // 60-attack suite cap.
-  const gapSeeds = useMemo(() => {
-    const gaps = rows
-      .filter((r) => r.state !== "green")
-      .sort((a, b) => b.pri - a.pri)
-      .slice(0, 8)
-      .map((r) => r.seedId);
-    return gaps;
-  }, [rows]);
+  // (orange state).
+  //
+  // We compute the full gap list so the CTA can show the real number
+  // per env, then clamp the deep-linked payload to top 8 to keep the
+  // launched campaign within the 60-attack suite cap.
+  const gapRows = useMemo(
+    () =>
+      rows
+        .filter((r) => r.state !== "green")
+        .sort((a, b) => b.pri - a.pri),
+    [rows],
+  );
+  const gapCount = gapRows.length;
+  const gapSeedsCapped = useMemo(
+    () => gapRows.slice(0, 8).map((r) => r.seedId),
+    [gapRows],
+  );
 
-  const gapsQuery = gapSeeds.length > 0
-    ? `?categories=${encodeURIComponent(gapSeeds.join(","))}`
+  const gapsQuery = gapSeedsCapped.length > 0
+    ? `?categories=${encodeURIComponent(gapSeedsCapped.join(","))}`
     : "";
 
   return (
@@ -144,13 +151,19 @@ export default function CoveragePage() {
               {rows.length} ranked subcategories from THREAT_MODEL.md &nbsp;·&nbsp; {tested} tested &nbsp;·&nbsp; {untested} untested &nbsp;·&nbsp; {withExploits} with confirmed exploits
             </p>
           </div>
-          {gapSeeds.length > 0 && (
+          {gapCount > 0 && (
             <Link
               href={`/run${gapsQuery}`}
               className="shrink-0 rounded-lg bg-teal-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-teal-700"
-              title={`Pre-selects ${gapSeeds.length} highest-priority gap subcategories on /run`}
+              title={
+                gapCount > gapSeedsCapped.length
+                  ? `Pre-selects the top ${gapSeedsCapped.length} of ${gapCount} gap subcategories on /run (capped at the 60-attack suite limit)`
+                  : `Pre-selects ${gapCount} gap subcategory${gapCount === 1 ? "" : "ies"} on /run`
+              }
             >
-              Re-run {gapSeeds.length} gaps →
+              {gapCount > gapSeedsCapped.length
+                ? `Re-run top ${gapSeedsCapped.length} of ${gapCount} gaps →`
+                : `Re-run ${gapCount} gaps →`}
             </Link>
           )}
         </div>
