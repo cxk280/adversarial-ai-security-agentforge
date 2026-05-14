@@ -145,6 +145,9 @@ export interface FindingSummary {
   discovered: string;
   attack_id?: string;
   repro_summary?: string;
+  /** Target URL the exploit was found on. May be wrapped in backticks
+   * (hand-authored markdown findings). Use matchesTarget() to compare. */
+  target?: string;
   /** Documentation Agent lifecycle for AUTO-* findings. Hand-authored
    *  VULN-NNNN findings don't set this (always undefined). */
   doc_agent_status?: "absent" | "in_progress" | "completed" | "failed";
@@ -329,6 +332,7 @@ export interface CoverageRow {
   last_run_at: string | null;
 }
 
-export function getCoverage(): Promise<{ rows: CoverageRow[] }> {
-  return request(`/coverage`);
+export function getCoverage(target?: string): Promise<{ rows: CoverageRow[] }> {
+  const q = target ? `?target=${encodeURIComponent(target)}` : "";
+  return request(`/coverage${q}`);
 }

@@ -1,15 +1,23 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
 import { useRuns } from "@/hooks/use-runs";
 import type { RunSummary } from "@/lib/api";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 
 export default function RunsHistoryPage() {
   const { data, isLoading, error } = useRuns();
-  const runs: RunSummary[] = data?.runs ?? [];
+  const { target } = useTarget();
+  // Scope to the TopBar-selected target — runs against dev are not
+  // listed alongside qa/prod runs.
+  const runs: RunSummary[] = useMemo(
+    () => (data?.runs ?? []).filter((r) => matchesTarget(r.target_url, target)),
+    [data, target],
+  );
 
   const total = runs.length;
   const exploits = runs.reduce((s, r) => s + (r.totals?.pass ?? 0), 0);

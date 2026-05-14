@@ -75,10 +75,10 @@ export function useAttempts(runId: string | undefined) {
   });
 }
 
-export function useCoverage() {
+export function useCoverage(target?: string) {
   return useQuery({
-    queryKey: ["coverage"],
-    queryFn: () => getCoverage(),
+    queryKey: ["coverage", target ?? "all"],
+    queryFn: () => getCoverage(target),
     refetchInterval: 30_000,
   });
 }

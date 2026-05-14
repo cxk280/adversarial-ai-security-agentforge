@@ -81,3 +81,36 @@ export function useTarget(): Ctx {
   }
   return ctx;
 }
+
+/**
+ * Normalize a target URL for comparison. Strips:
+ *   - backticks (markdown findings wrap URLs in backticks)
+ *   - leading/trailing whitespace
+ *   - trailing slashes
+ *   - https?:// scheme
+ *
+ * Used by matchesTarget() so we can compare a Finding's `target` field
+ * against a TargetMeta.url regardless of which side has decoration.
+ */
+function _normalizeTargetUrl(s: string | undefined | null): string {
+  if (!s) return "";
+  return s
+    .trim()
+    .replace(/^`|`$/g, "")
+    .replace(/^https?:\/\//, "")
+    .replace(/\/+$/, "")
+    .toLowerCase();
+}
+
+/**
+ * True iff `itemTarget` (a Finding.target, RunSummary.target_url, etc.)
+ * matches the selected target's host. Compares normalized hosts so the
+ * matcher tolerates trailing slashes, scheme variance, and the backtick
+ * wrapping that hand-authored markdown findings carry.
+ */
+export function matchesTarget(itemTarget: string | undefined | null, selected: TargetMeta): boolean {
+  const a = _normalizeTargetUrl(itemTarget);
+  if (!a) return false;
+  // Match either the full host or just the bare hostname.
+  return a === _normalizeTargetUrl(selected.url) || a === _normalizeTargetUrl(selected.host);
+}

@@ -7,6 +7,7 @@ import { SeverityBadge } from "@/components/severity-badge";
 import { StatusPill } from "@/components/status-pill";
 import { relativeTime } from "@/lib/format";
 import { useFindings } from "@/hooks/use-runs";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 
 /**
  * Sort key: open findings first (ascending VULN-NNNN), then in_progress,
@@ -29,15 +30,21 @@ function _vulnNum(id: string): number {
 
 export default function FindingsPage() {
   const { data, isLoading, error } = useFindings();
+  const { target } = useTarget();
   const findings = useMemo(() => {
     const raw = data?.findings ?? [];
-    return [...raw].sort((a, b) => {
+    // Filter to the target selected in the TopBar so each env shows
+    // only its own exploits — mirrors how operators actually think
+    // about findings (dev exploits aren't a prod regression and vice
+    // versa).
+    const scoped = raw.filter((f) => matchesTarget(f.target, target));
+    return scoped.sort((a, b) => {
       const sa = STATUS_RANK[a.status] ?? 99;
       const sb = STATUS_RANK[b.status] ?? 99;
       if (sa !== sb) return sa - sb;
       return _vulnNum(a.id) - _vulnNum(b.id);
     });
-  }, [data]);
+  }, [data, target]);
 
   const open = findings.filter((f) => f.status === "open").length;
   const inProg = findings.filter((f) => f.status === "in_progress").length;

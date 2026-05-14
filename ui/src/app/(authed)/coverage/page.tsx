@@ -6,6 +6,7 @@ import { TopBar } from "@/components/top-bar";
 import { cn } from "@/lib/utils";
 import { prettySnake, pct, relativeTime } from "@/lib/format";
 import { useCoverage } from "@/hooks/use-runs";
+import { useTarget } from "@/lib/target-context";
 
 /** Static priority ranking from THREAT_MODEL.md. The 17 leaves never
  * change between runs; only the per-row stats do. We carry this table
@@ -60,7 +61,11 @@ function rowKey(cat: string, sub: string) {
 }
 
 export default function CoveragePage() {
-  const { data, isLoading, error } = useCoverage();
+  const { target } = useTarget();
+  // Per-env coverage: which subcategories have been exercised on the
+  // selected target specifically. Dev coverage isn't qa/prod coverage —
+  // an attack that holds in dev might break in prod and vice versa.
+  const { data, isLoading, error } = useCoverage(target.url);
 
   const rows = useMemo(() => {
     const live = new Map<

@@ -8,16 +8,29 @@ import { RecentRunsCard } from "@/components/recent-runs-card";
 import { useFindings, useRuns, useCoverage } from "@/hooks/use-runs";
 import { relativeTime, usd } from "@/lib/format";
 import { pingTarget, type TargetPing, type RunSummary } from "@/lib/api";
-import { useTarget } from "@/lib/target-context";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 import { cn } from "@/lib/utils";
 
 export default function DashboardPage() {
+  const { target } = useTarget();
   const { data: findingsData } = useFindings();
   const { data: runsData } = useRuns();
-  const { data: coverageData } = useCoverage();
+  const { data: coverageData } = useCoverage(target.url);
 
-  const findings = findingsData?.findings ?? [];
-  const runs = runsData?.runs ?? [];
+  // Filter every datapoint by the currently-selected target. Each
+  // env (dev/qa/prod) gets its own view: dev exploits aren't a prod
+  // regression and vice versa. Coverage is per-env too because the
+  // same subcategory can be "tested" in dev but "untested" in prod.
+  const allFindings = findingsData?.findings ?? [];
+  const allRuns = runsData?.runs ?? [];
+  const findings = useMemo(
+    () => allFindings.filter((f) => matchesTarget(f.target, target)),
+    [allFindings, target],
+  );
+  const runs = useMemo(
+    () => allRuns.filter((r) => matchesTarget(r.target_url, target)),
+    [allRuns, target],
+  );
   const coverageRows = coverageData?.rows ?? [];
 
   const stats = useMemo(() => {

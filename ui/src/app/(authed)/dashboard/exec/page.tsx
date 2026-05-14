@@ -7,15 +7,25 @@ import { cn } from "@/lib/utils";
 import { useFindings, useRuns } from "@/hooks/use-runs";
 import { usd } from "@/lib/format";
 import { downloadComplianceReport } from "@/lib/api";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 
 interface KpiTone { tone: "green" | "red" | "orange"; }
 
 export default function ExecPage() {
   const { data: findingsData } = useFindings();
   const { data: runsData } = useRuns();
+  const { target } = useTarget();
 
-  const findings = findingsData?.findings ?? [];
-  const runs = runsData?.runs ?? [];
+  // Scope every KPI to the currently-selected target. The executive
+  // view is per-env: dev posture isn't prod posture and vice versa.
+  const findings = useMemo(
+    () => (findingsData?.findings ?? []).filter((f) => matchesTarget(f.target, target)),
+    [findingsData, target],
+  );
+  const runs = useMemo(
+    () => (runsData?.runs ?? []).filter((r) => matchesTarget(r.target_url, target)),
+    [runsData, target],
+  );
 
   const kpis = useMemo(() => {
     const openFindings = findings.filter(

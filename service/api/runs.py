@@ -220,11 +220,17 @@ async def get_run_artifact(
 
 
 @router.get("/coverage")
-async def get_coverage(_token: str = Depends(require_bearer)) -> dict:
+async def get_coverage(
+    target: str | None = None,
+    _token: str = Depends(require_bearer),
+) -> dict:
     """Per-(category, subcategory) attempt aggregates for the live Coverage
     matrix. The UI merges these with the static threat-model taxonomy so
-    untested subcategories still appear, but tested ones get real numbers."""
-    return {"rows": db.coverage_by_subcategory()}
+    untested subcategories still appear, but tested ones get real numbers.
+
+    When `target` is provided, scope the aggregate to attempts on that
+    target only — used by the per-env Coverage view in the UI."""
+    return {"rows": db.coverage_by_subcategory(target_url=target)}
 
 
 @router.get("/judge-accuracy")

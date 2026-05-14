@@ -438,25 +438,34 @@ def upsert_finding_status_override(row: dict[str, Any]) -> None:
         )
 
 
-def coverage_by_subcategory() -> list[dict[str, Any]]:
+def coverage_by_subcategory(target_url: str | None = None) -> list[dict[str, Any]]:
     """Aggregate attempts by (category, subcategory): case count, pass-held
     rate, exploit count, last-seen timestamp. Used to derive the live
-    Coverage matrix from real runs rather than a hardcoded table."""
+    Coverage matrix from real runs rather than a hardcoded table.
+
+    When target_url is provided, restrict the aggregation to attempts
+    from runs against that target only. This is what the per-env
+    Coverage view in the UI uses so dev-only attempts don't pollute
+    qa/prod coverage counts."""
+    sql = """
+        SELECT
+            attempts.category                                AS category,
+            attempts.subcategory                             AS subcategory,
+            COUNT(*)                                         AS cases,
+            SUM(CASE WHEN verdict = 'pass' THEN 1 ELSE 0 END) AS exploits,
+            SUM(CASE WHEN verdict = 'fail' THEN 1 ELSE 0 END) AS held,
+            SUM(CASE WHEN verdict = 'partial' THEN 1 ELSE 0 END) AS partial,
+            MAX(attempts.started_at)                         AS last_run_at
+        FROM attempts
+    """
+    params: list[Any] = []
+    if target_url:
+        sql += " JOIN regression_runs r ON r.run_id = attempts.run_id"
+        sql += " WHERE r.target_url = ?"
+        params.append(target_url)
+    sql += " GROUP BY attempts.category, attempts.subcategory"
     with get_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT
-                category,
-                subcategory,
-                COUNT(*)                                       AS cases,
-                SUM(CASE WHEN verdict = 'pass' THEN 1 ELSE 0 END) AS exploits,
-                SUM(CASE WHEN verdict = 'fail' THEN 1 ELSE 0 END) AS held,
-                SUM(CASE WHEN verdict = 'partial' THEN 1 ELSE 0 END) AS partial,
-                MAX(started_at)                                AS last_run_at
-            FROM attempts
-            GROUP BY category, subcategory
-            """,
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 

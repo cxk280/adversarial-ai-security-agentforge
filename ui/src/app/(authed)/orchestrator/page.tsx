@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { relativeTime, usd } from "@/lib/format";
 import { useRuns } from "@/hooks/use-runs";
 import { fetchJudgeAccuracy, type JudgeAccuracy, type RunSummary } from "@/lib/api";
+import { matchesTarget, useTarget } from "@/lib/target-context";
 
 /**
  * Orchestrator — shows the platform's *configuration* (budget caps,
@@ -43,7 +44,12 @@ const ESCALATION_TRIGGERS = [
 
 export default function OrchestratorPage() {
   const { data, isLoading, error } = useRuns();
-  const runs: RunSummary[] = data?.runs ?? [];
+  const { target } = useTarget();
+  // Scope to TopBar target — campaign queue, recent runs, and per-env
+  // burn all reflect the selected environment.
+  const runs: RunSummary[] = (data?.runs ?? []).filter((r) =>
+    matchesTarget(r.target_url, target),
+  );
 
   const active = runs.filter(
     (r) => r.state === "running" || r.state === "queued",
@@ -52,14 +58,18 @@ export default function OrchestratorPage() {
 
   const startOfDay = new Date();
   startOfDay.setUTCHours(0, 0, 0, 0);
-  const burnDevToday = runs
-    .filter((r) => r.target_url.includes("copilot-agent-dev"))
+  // burnTargetToday: today's spend on the selected target only.
+  // burnGlobalToday is read from the unfiltered list so it still
+  // reflects platform-wide spend across every target — that's the
+  // budget cap that matters for cost enforcement.
+  const allRuns = data?.runs ?? [];
+  const burnTargetToday = runs
     .filter((r) => {
       const d = new Date(r.started_at);
       return !Number.isNaN(d.getTime()) && d >= startOfDay;
     })
     .reduce((s, r) => s + (r.spend_usd ?? 0), 0);
-  const burnGlobalToday = runs
+  const burnGlobalToday = allRuns
     .filter((r) => {
       const d = new Date(r.started_at);
       return !Number.isNaN(d.getTime()) && d >= startOfDay;
@@ -159,8 +169,8 @@ export default function OrchestratorPage() {
                 /regression-runs spend.
               </p>
               <BudgetBar
-                label="Per-day on dev"
-                spent={burnDevToday}
+                label={`Per-day on ${target.label}`}
+                spent={burnTargetToday}
                 cap={BUDGET_CAPS.perDayDevUsd}
               />
               <BudgetBar
