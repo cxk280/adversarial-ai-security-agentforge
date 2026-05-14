@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { Suspense, useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { TopBar } from "@/components/top-bar";
@@ -46,7 +46,27 @@ const MODES = [
 
 const SUITE_LIMIT = 60; // matches promotion-gate-v1.limit in service/runner.py
 
+/**
+ * Page entry — wraps the actual content in a <Suspense> boundary.
+ * useSearchParams() (used by RunPageInner to read the coverage
+ * "Re-run gaps" deep-link's ?categories= param) must live under a
+ * Suspense boundary or Next.js 13+ refuses to build (it can't
+ * statically prerender a query-string-dependent component).
+ *
+ * The fallback below is intentionally minimal — RunPageInner mounts
+ * within milliseconds since search-params are already available in
+ * the browser; the fallback only flashes during the initial SSR
+ * hand-off.
+ */
 export default function RunPage() {
+  return (
+    <Suspense fallback={<div className="px-8 py-6 text-sm text-slate-500">Loading…</div>}>
+      <RunPageInner />
+    </Suspense>
+  );
+}
+
+function RunPageInner() {
   // Target is read from the global TopBar dropdown — no duplicate
   // picker in the page body. See project_w3_target_selection_redundant.
   const { target } = useTarget();

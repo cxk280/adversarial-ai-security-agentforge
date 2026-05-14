@@ -169,6 +169,17 @@ jobs:
           name: npm run test (Vitest)
           working_directory: ui
           command: npm run test -- --run
+      - run:
+          # Vitest catches runtime/component bugs in jsdom, but it
+          # does NOT exercise Next.js's production build pipeline.
+          # Bugs that only fire during static prerender (e.g.
+          # useSearchParams() without a Suspense boundary, server-
+          # component-only directives in client files) sneak through
+          # vitest and explode on Railway. `next build` is the cheap
+          # local equivalent of the Railway build, so we run it here.
+          name: npm run build (catches Next.js prerender errors)
+          working_directory: ui
+          command: npm run build
 
   # ── Architecture drift linter
   arch-drift-lint:
