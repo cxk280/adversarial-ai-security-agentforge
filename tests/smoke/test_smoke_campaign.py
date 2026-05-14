@@ -43,12 +43,25 @@ def fake_executor():
 
 
 def test_seed_dispatcher_loads_all_categories():
-    """The seed corpus must load without errors. Catches YAML drift."""
+    """The seed corpus must load without errors. Catches YAML drift.
+
+    The threat-model taxonomy (THREAT_MODEL.md) has 6 top-level categories;
+    we now ship seeds for all of them. The set assertion below is the
+    full expected list — if the seed corpus loses a top-level category,
+    this will fail loudly."""
     d = SeedDispatcher("evals/seeds")
     seeds = d.load_all()
     assert len(seeds) >= 50, f"Expected ≥50 seeds, got {len(seeds)}"
     cats = {a.category for a in seeds}
-    assert cats == {"data_exfiltration", "prompt_injection", "identity_role_exploitation"}, cats
+    expected_cats = {
+        "data_exfiltration",
+        "prompt_injection",
+        "identity_role_exploitation",
+        "state_corruption",
+        "tool_misuse",
+        "denial_of_service",
+    }
+    assert cats == expected_cats, cats
 
 
 def test_5_seed_smoke_against_stub(fake_executor):
