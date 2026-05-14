@@ -1,21 +1,22 @@
 # CircleCI pipeline for the AgentForge Adversarial AI Security Platform.
 #
-# Mirrors the W2 agentforge repo's dev → qa → prod pattern (see
-# ../agentforge/.circleci/config.yml). Master push triggers dev verification.
-# qa and prod promotions are manual approval gates (hold-qa, hold-prod) that
-# push HEAD onto the qa or prod branch via the GitHub App installation
-# token — same bot-only push isolation as W2 (memory:
-# project_bot_only_push_isolation). Each promotion is tagged
-# <env>-YYYY-MM-DD-N for audit (memory: project_env_branches_to_tags).
+# The adversary platform is a single-env security tool that continuously
+# exercises whichever target the W2 Co-Pilot CI is promoting through
+# dev/qa/prod. There is one adversary-agent + one adversary-ui instance
+# (dev), so the workflow ends at the validation gate (judge-golden-set +
+# red-team-smoke). No qa/prod promotion ladders — the tool itself is
+# not the thing being promoted; the targets it tests are.
 #
-# The Railway services watch the master / qa / prod branches and auto-
-# deploy on push. Railway cannot watch tags, so the branch is the deploy
-# ref and the tag is audit-only.
+# Master push triggers: unit tests, integration tests, an e2e probe
+# against the deployed dev adversary-agent, then the paid LLM
+# validation jobs (judge accuracy on a canary corpus, red-team RunPod
+# smoke). Railway auto-deploys master.
 #
 # What this pipeline does NOT do that the W2 one does:
 #   - Promote the OpenEMR PHP side (we're a separate app)
 #   - Run smoke against an OpenEMR endpoint
 #   - Run a 25-case eval suite (we run our own smoke against our own API)
+#   - Promote through dev → qa → prod (single-env tool)
 #
 # See TESTING.md for the full test matrix this pipeline executes.
 
@@ -50,56 +51,6 @@ executors:
 
 # ─── Reusable commands ──────────────────────────────────────────────────
 commands:
-  promote-to-env-branch:
-    description: |
-      Push HEAD onto the target env branch (qa / prod) AND tag it
-      <env>-YYYY-MM-DD-N for audit. Pattern lifted verbatim from the W2
-      agentforge repo. Auth uses a GitHub App installation token — the
-      only identity allowed to push qa / prod under branch protection.
-    parameters:
-      env_branch:
-        type: string
-    steps:
-      - checkout
-      - run:
-          name: Mint GitHub App installation token
-          command: |
-            for var in GITHUB_APP_ID GITHUB_APP_PRIVATE_KEY GITHUB_APP_INSTALLATION_ID; do
-              if [ -z "$(eval echo \$$var)" ]; then
-                echo "✗ $var not set — cannot promote." >&2
-                exit 1
-              fi
-            done
-            pip install --quiet 'PyJWT[crypto]'
-            TOKEN=$(python3 scripts/mint-github-installation-token.py)
-            if [ -z "$TOKEN" ]; then
-              echo "✗ Token mint returned empty." >&2
-              exit 1
-            fi
-            echo "export GH_INSTALLATION_TOKEN=$TOKEN" >> "$BASH_ENV"
-      - run:
-          name: Push HEAD → << parameters.env_branch >>
-          command: |
-            git push \
-              "https://x-access-token:${GH_INSTALLATION_TOKEN}@github.com/cxk280/adversarial-ai-security-agentforge.git" \
-              "${CIRCLE_SHA1}:refs/heads/<< parameters.env_branch >>"
-      - run:
-          name: Tag as << parameters.env_branch >>-YYYY-MM-DD-N
-          command: |
-            ENV="<< parameters.env_branch >>"
-            TODAY=$(date -u +%Y-%m-%d)
-            AUTH_URL="https://x-access-token:${GH_INSTALLATION_TOKEN}@github.com/cxk280/adversarial-ai-security-agentforge.git"
-            EXISTING=$(git ls-remote --tags "$AUTH_URL" \
-              | grep -cE "refs/tags/${ENV}-${TODAY}-[0-9]+\$" \
-              || true)
-            N=$((EXISTING + 1))
-            TAG="${ENV}-${TODAY}-${N}"
-            git -c user.email="ci@adversarial.local" \
-                -c user.name="Adversarial CI Promoter" \
-                tag -a "${TAG}" "${CIRCLE_SHA1}" \
-                -m "Promote ${CIRCLE_SHA1:0:7} → ${ENV}"
-            git push "$AUTH_URL" "refs/tags/${TAG}"
-
   wait-for-adversary-sha:
     description: |
       Poll the deployed adversary-agent's /version endpoint until the
@@ -287,19 +238,6 @@ jobs:
           working_directory: ui
           command: npx playwright test --reporter=line
 
-  # ── Promotions
-  promote-qa:
-    executor: python
-    steps:
-      - promote-to-env-branch:
-          env_branch: qa
-
-  promote-prod:
-    executor: python
-    steps:
-      - promote-to-env-branch:
-          env_branch: prod
-
 # ─── Workflows ──────────────────────────────────────────────────────────
 workflows:
   build-test-deploy:
@@ -326,43 +264,21 @@ workflows:
             - arch-drift-lint
           filters: { branches: { only: master } }
 
-      # QA gate — manual approval after dev verification + paid LLM tests
+      # Paid LLM tests — verify the security tool's own validators
+      # (red-team mutator + dual-judge) against canary corpora.
       - red-team-smoke:
           requires: [e2e-dev]
           filters: { branches: { only: master } }
       - judge-golden-set:
           requires: [e2e-dev]
           filters: { branches: { only: master } }
-      - hold-qa:
-          type: approval
-          requires: [red-team-smoke, judge-golden-set]
-          filters: { branches: { only: master } }
 
-      # QA promotion
-      - promote-qa:
-          requires: [hold-qa]
-          filters: { branches: { only: master } }
-      - e2e-against-deployed:
-          name: e2e-qa
-          base_url: "https://adversary-agent-qa.up.railway.app"
-          requires: [promote-qa]
-          filters: { branches: { only: master } }
-
-      # Prod gate — manual approval after qa verification
-      - hold-prod:
-          type: approval
-          requires: [e2e-qa]
-          filters: { branches: { only: master } }
-
-      # Prod promotion
-      - promote-prod:
-          requires: [hold-prod]
-          filters: { branches: { only: master } }
-      - e2e-against-deployed:
-          name: e2e-prod
-          base_url: "https://adversary-agent-production.up.railway.app"
-          requires: [promote-prod]
-          filters: { branches: { only: master } }
+      # The adversary platform is a single-env security tool, not a
+      # tiered application — it runs continuously against whichever
+      # target the W2 Co-Pilot CI promotes through dev/qa/prod. There
+      # is one adversary-agent + one adversary-ui instance (dev), so
+      # the workflow stops at the validation gate. No promote-qa,
+      # promote-prod, or e2e-qa/e2e-prod equivalents.
 
   nightly:
     triggers:
